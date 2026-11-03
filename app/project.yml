@@ -1,0 +1,31 @@
+name: RecapStudio
+options:
+  bundleIdPrefix: com.thanhle
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  RecapKit:
+    path: RecapKit
+targets:
+  RecapStudio:
+    type: application
+    platform: macOS
+    sources: [RecapStudio]
+    dependencies:
+      - package: RecapKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.thanhle.RecapStudio
+        PRODUCT_NAME: RecapStudio
+        SWIFT_VERSION: "6.0"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: RecapStudio
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.video
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Runs python, ffmpeg, claude and ollama: no App Sandbox (spec §7.1). Local build, ad-hoc signed.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual

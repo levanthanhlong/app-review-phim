@@ -1,0 +1,45 @@
+# ---- macOS -----------------------------------------------------------------
+.DS_Store
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+
+# ---- Editors ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---- Python (worker/) ------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Swift / Xcode (app/) --------------------------------------------------
+# app/.gitignore covers build/, the XcodeGen-generated *.xcodeproj and SwiftPM folders.
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# ---- Local data (large, per machine) ---------------------------------------
+# Recap projects: films, proxies, renders (several GB each).
+/output/
+# Background music library (user files, not code).
+/music/
+# External tools with their own venvs and model weights (Stable Audio 3, ACE-Step).
+/tools/
+
+# ---- Claude Code -----------------------------------------------------------
+# Project skills in .claude/skills/ are shared; personal settings are not.
+.claude/settings.local.json
