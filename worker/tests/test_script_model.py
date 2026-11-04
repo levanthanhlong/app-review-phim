@@ -160,3 +160,25 @@ def test_duration_check_uses_given_speaking_rate() -> None:
     assert validate_items(raw, BEATS, target_sec=10.0)[1] == []
     _, errors = validate_items(raw, BEATS, target_sec=10.0, words_per_sec=5.0)
     assert any("Tổng thời lượng ước tính 6 giây" in e for e in errors)
+
+
+def test_long_clips_are_reported_when_a_maximum_is_given() -> None:
+    raw = [
+        narrate("một hai ba bốn năm sáu", ("B0003", 20, 32)),  # 12 s clip
+        {"type": "original", "beat": "B0003", "start": 25, "end": 38},  # 13 s of film sound
+    ]
+    beats = {**BEATS, "B0003": beat(3, 20.0, 40.0)}
+
+    _, errors = validate_items(raw, beats, target_sec=0, check_duration=False, max_clip_sec=8, max_original_sec=10)
+
+    assert any("Dòng 1 clip 1" in e and "tối đa 8 giây" in e for e in errors)
+    assert any("Dòng 2" in e and "tối đa 10 giây" in e for e in errors)
+
+
+def test_without_a_maximum_long_clips_are_accepted() -> None:
+    # scripts written before the limit, and the Script Editor's whole-beat clips, still load
+    beats = {**BEATS, "B0003": beat(3, 20.0, 40.0)}
+
+    _, errors = validate_items([narrate("một hai", ("B0003", 20, 32))], beats, target_sec=0, check_duration=False)
+
+    assert errors == []

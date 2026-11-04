@@ -15,6 +15,7 @@ dependencies = [
     "vieneu>=3.8,<4",
     # Pinned: onnxruntime >=1.23 rejects VieNeu's external weights because the HF cache stores them as symlinks.
     "onnxruntime==1.22.1",
+    "pyobjc-framework-vision>=10",
 ]
 
 [dependency-groups]

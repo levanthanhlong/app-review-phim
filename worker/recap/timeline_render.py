@@ -20,7 +20,9 @@ from recap.branding import (
     build_frame,
     check_image,
     image_size,
+    load_style,
 )
+from recap.cleanup import SourceCleanup, load_cleanup
 from recap.fit import TimelineEntry
 from recap.models import Settings
 from recap.music import MusicBed, MusicError, music_bed, music_filter, music_inputs
@@ -28,7 +30,7 @@ from recap.render import RenderProfile, concat_args, item_args
 from recap.runner import StageContext, StageFailure
 
 RENDER_DIR = "work/render"
-RENDER_VERSION = "1"  # bump when render.py output changes, to invalidate cached clips
+RENDER_VERSION = "2"  # bump when render.py output changes, to invalidate cached clips
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class RenderJob:
     audio_stream: int = 0  # index among the source's audio streams
     music: MusicBed | None = None  # background music mixed in at the join
     brand: tuple[BrandLayout, Path] | None = None  # (layout, frame PNG) of the channel branding
+    cleanup: SourceCleanup = SourceCleanup()  # source watermarks to blur, black bars to crop
 
 
 BRAND_DIR = "work/brand"
@@ -53,10 +56,18 @@ def load_branding(settings: Settings, project_dir: Path, profile: RenderProfile)
     try:
         banner = check_image(settings.brand_banner)
         logo = check_image(settings.brand_logo) if settings.brand_logo else None
+        style = load_style(banner)
     except BrandingError as exc:
         raise StageFailure("branding_missing", str(exc)) from exc
-    layout = brand_layout(image_size(banner), profile.width, profile.height)
-    return layout, build_frame(banner, logo, layout, project_dir / BRAND_DIR / f"{profile.name}.png")
+    layout = brand_layout(image_size(banner), profile.width, profile.height, style)
+    return layout, build_frame(banner, logo, layout, style, project_dir / BRAND_DIR / f"{profile.name}.png")
+
+
+def cleanup_signature(project_dir: Path) -> str | None:
+    """Fingerprint part for assemble/export: what is cleaned (None = nothing), so a new inspect report
+    that only changes the skipped beats does not re-render."""
+    cleanup = load_cleanup(project_dir)
+    return None if cleanup == SourceCleanup() else "cleanup:" + hashlib.sha256(cleanup.key().encode()).hexdigest()[:16]
 
 
 def load_music(settings: Settings, project_dir: Path) -> MusicBed | None:
@@ -89,6 +100,8 @@ def _render_entries(ctx: StageContext, stage: str, timeline: list[TimelineEntry]
     extra = [job.profile.name, str(job.fps), str(job.duck), config.file_signature(job.source), f"a{job.audio_stream}"]
     if job.brand is not None:  # content hash: the frame is redrawn on every run
         extra.append("brand:" + hashlib.sha256(job.brand[1].read_bytes()).hexdigest()[:16])
+    if job.cleanup != SourceCleanup():  # only then, so clips rendered before `inspect` stay cached
+        extra.append("cleanup:" + job.cleanup.key())
 
     clips: list[Path] = []
     fresh = 0
@@ -125,7 +138,7 @@ def _render_one(
     tmp = out.with_name(f"{out.stem}.tmp.mkv")
     args = item_args(
         entry, job.source, tts_path, job.profile, job.fps, job.duck, edges[0], edges[1], tmp, job.audio_stream,
-        job.brand,
+        job.brand, job.cleanup,
     )
     try:
         media.run_ffmpeg(args, total_sec=entry.out_end - entry.out_start, on_progress=lambda _: None, log=ctx.log)

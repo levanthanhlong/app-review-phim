@@ -2,7 +2,7 @@ import Foundation
 
 /// The pipeline stages, in order (worker `STAGE_NAMES`).
 public enum StageName: String, CaseIterable, Sendable, Codable, Identifiable {
-    case ingest, transcribe, scenes, describe, script, tts, music, assemble, export
+    case ingest, transcribe, scenes, inspect, describe, script, tts, music, assemble, export
 
     public var id: String { rawValue }
 
@@ -11,6 +11,7 @@ public enum StageName: String, CaseIterable, Sendable, Codable, Identifiable {
         case .ingest: "Nạp phim"
         case .transcribe: "Nhận dạng lời thoại"
         case .scenes: "Chia cảnh"
+        case .inspect: "Kiểm tra nguồn"
         case .describe: "Mô tả cảnh"
         case .script: "Viết kịch bản"
         case .tts: "Tạo giọng đọc"

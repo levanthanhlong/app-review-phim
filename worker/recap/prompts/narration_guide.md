@@ -11,7 +11,8 @@ Lời kể sẽ được giọng AI đọc lên, nên phải viết như văn n�
 - Chủ ngữ rõ ràng, động từ mạnh: "Hắn rút súng", không phải "Hành động rút súng được thực hiện".
 - Dùng từ đệm và tiểu từ của văn nói, vừa phải: "thì", "mà", "đấy", "luôn", "cơ", "chứ", "ngay lập tức".
 - Dùng cách xưng hô của kênh review: "chúng ta", "anh chàng", "cô nàng", "ông chú", "gã", "bà cụ".
-  Gọi nhân vật bằng tên khi đã biết. Chưa biết tên thì gọi theo đặc điểm: "anh chàng áo khoác đen".
+  Gọi nhân vật bằng tên khi đã biết (tên thường xuất hiện trong thoại). Chưa biết tên thì gọi theo vai trò
+  hoặc quan hệ: "người cha", "gã trùm", "cô bạn thân". **Không bao giờ** gọi theo màu áo, quần áo hay kiểu tóc.
 - Thỉnh thoảng nói thẳng với khán giả: "Các bạn để ý nhé", "Và đây mới là lúc mọi chuyện bắt đầu".
   Tối đa khoảng 1 lần mỗi 6–8 câu, không lạm dụng.
 
@@ -53,15 +54,22 @@ cảm xúc", "đầy bất ngờ", "không thể bỏ lỡ".
   "Nước đi này thì ai cũng phải chịu". Chỉ bình luận về những gì đã chiếu, không phán xét ngoài phim.
 - **Nối liền mạch:** câu sau tiếp nối câu trước về nghĩa. Khán giả nghe liền một mạch phải hiểu được
   chuyện, kể cả khi không nhìn hình.
-- **Kết:** phần cuối khép lại bằng một nhận xét, một bài học, hoặc một câu bỏ ngỏ khiến người xem
-  ngẫm nghĩ. Không kêu gọi đăng ký, bấm like.
+- **Chuyển cảnh:** khi chuyển sang tình huống, địa điểm hay thời điểm mới thì có một câu chuyển ("Ba ngày
+  sau...", "Trong khi đó ở thị trấn bên kia..."). Trước một bước ngoặt, đặt một câu giữ tò mò.
+- **Kết:** phần cuối khép lại bằng một nhận xét ngắn của kênh (một bài học, một câu bỏ ngỏ), rồi câu cuối
+  cùng của video mời khán giả bình luận, gắn với phim: "Nếu là bạn, bạn có tha thứ cho ông ấy không? Hãy để
+  lại bình luận cho mình biết nhé." Không xin đăng ký, bấm like.
 
-## 3. Lời kể phải khớp hình
+## 3. Kể chuyện, không tả cảnh
 
-- Câu kể nói về đúng thứ đang chiếu trong clip đi kèm. Hình chiếu cảnh đánh nhau thì không kể chuyện
-  hôm qua.
+- Câu kể khớp với clip đi kèm (đúng nhân vật, đúng sự việc). Hình chiếu cảnh đánh nhau thì không kể
+  chuyện hôm qua.
+- Kể theo quan hệ nhân quả: vì sao chuyện xảy ra, nó dẫn tới đâu. Người xem nghe phải hiểu mạch truyện.
 - Đừng tả lại cái khán giả đang thấy rõ ("Anh ta đang đi trên đường"). Hãy nói cái hình không tự nói
   được: động cơ, mối quan hệ, cái giá phải trả, điều sắp xảy ra.
+- Không đọc lại thoại của nhân vật. Muốn dùng lời thoại thì giữ đoạn thoại gốc (mục 4), hoặc tóm ý nó.
+- Mỗi câu phải đẩy câu chuyện đi tiếp hoặc giải thích điều người xem cần biết. Câu chỉ tả lại hình là
+  câu thừa.
 - Chọn clip có chuyển động hoặc biểu cảm rõ cho các câu quan trọng. Cảnh tĩnh, trống thì dùng cho câu
   chuyển ý ngắn.
 
@@ -87,3 +95,5 @@ cảm xúc", "đầy bất ngờ", "không thể bỏ lỡ".
 2. Có ba câu liên tiếp nào cùng cấu trúc hoặc cùng từ mở đầu không?
 3. Câu đầu có đủ tò mò để người xem không lướt qua không?
 4. Mỗi câu có khớp với clip đi kèm không?
+5. Có câu nào gọi nhân vật theo quần áo, màu áo, kiểu tóc không? Có câu nào chỉ tả lại hình hoặc đọc lại
+   thoại không? Nếu có, viết lại.

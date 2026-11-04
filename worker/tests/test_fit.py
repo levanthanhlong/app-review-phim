@@ -116,3 +116,16 @@ def test_timeline_round_trips_through_json() -> None:
     ]
 
     assert timeline_from_json(json.loads(json.dumps([asdict(e) for e in timeline]))) == timeline
+
+
+def test_extension_never_makes_a_clip_longer_than_the_maximum() -> None:
+    # Arrange: a 4 s clip in a 20 s beat, narration needs 12 s
+    from recap.fit import MAX_SEGMENT_SEC
+
+    # Act
+    fitted = fit_narration([ClipRef("B0003", 22.0, 26.0)], BEATS, needed=12.0)
+
+    # Assert: the clip grows only to MAX_SEGMENT_SEC; the rest is slow motion / reported short
+    assert MAX_SEGMENT_SEC == 8.0
+    assert all(s.src_end - s.src_start <= MAX_SEGMENT_SEC + 1e-6 for s in fitted.segments)
+    assert fitted.fit == "short"

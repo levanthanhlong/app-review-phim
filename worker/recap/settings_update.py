@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from recap import config
-from recap.branding import BrandingError, check_image
+from recap.branding import BrandingError, check_image, load_style
 from recap.models import STAGE_NAMES, Project, Settings, StageStatus
 from recap.music import MusicError, check_music_file
 from recap.runner import Stage
@@ -65,6 +65,8 @@ def _validated(current: Settings, updates: Mapping[str, Any]) -> Settings:
         for image in (settings.brand_banner, settings.brand_logo):
             if image:
                 check_image(image)
+        if settings.brand_banner:
+            load_style(check_image(settings.brand_banner))  # a broken brand.json is reported now
     except (TTSError, MusicError, BrandingError) as exc:
         raise SettingsError(str(exc)) from exc
     return settings

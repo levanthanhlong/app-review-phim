@@ -84,6 +84,9 @@ def test_scenes_skips_when_up_to_date_and_reruns_after_setting_change(tmp_path: 
 
     _, evs = run_cli("scenes", "--project", str(project_dir))
     assert evs[-1]["skipped"] is True
+    old_beats = json.loads((project_dir / "work/scenes.json").read_text())
+    marks = {old_beats[0]["id"]: "star", old_beats[-1]["id"]: "skip"}
+    (project_dir / "work/beat_marks.json").write_text(json.dumps(marks))
 
     project = config.load_project(project_dir)
     config.save_project(
@@ -96,3 +99,8 @@ def test_scenes_skips_when_up_to_date_and_reruns_after_setting_change(tmp_path: 
     # old keyframes from the previous run are gone
     names = {p.name for p in (project_dir / "work/keyframes").iterdir()}
     assert names == {Path(b["keyframe"]).name for b in beats}
+    # marks survive only on beats whose range did not change
+    unchanged = {b["id"] for b in beats} & {b["id"] for b in old_beats if b in beats}
+    marks_path = project_dir / "work/beat_marks.json"
+    kept = json.loads(marks_path.read_text()) if marks_path.exists() else {}
+    assert kept == {k: v for k, v in marks.items() if k in unchanged}

@@ -37,7 +37,7 @@ struct EditableSettings: Equatable {
     var style = NarrationStyle.kichTinh
     var voice = "Hải Đăng"
     var ratePercent = 0
-    var duckVolume = 0.15
+    var duckVolume = 0.0  // film sound under narration (0 = muted)
     var musicSource = "library"  // "library" (musicFile, nil = none) | "ai"
     var musicFile: String?
     var musicModel = "medium"

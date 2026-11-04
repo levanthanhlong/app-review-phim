@@ -12,7 +12,7 @@ struct AIMusicView: View {
     @State private var error: String?
     @State private var needsRender = false
 
-    private var isBusy: Bool { model.queue.isBusy(project: project.id) }
+    private var isBusy: Bool { model.isBusy(project.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

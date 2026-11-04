@@ -27,13 +27,26 @@ def exported_project(tmp_path: Path, clip: Path) -> Path:
     return project_dir
 
 
-@pytest.mark.parametrize(
-    ("height", "size"), [(480, (854, 480)), (720, (1280, 720)), (1080, (1920, 1080)), (2160, (1920, 1080)), (None, (1920, 1080))]
-)
-def test_final_profile_is_1080p_without_upscaling(height: int | None, size: tuple[int, int]) -> None:
+@pytest.mark.parametrize("height", [480, 720, 1080, 2160, None])
+def test_final_profile_is_always_1080p_at_a_fixed_bitrate(height: int | None) -> None:
+    # smaller sources are scaled up (lanczos + light sharpening): the platforms favour 1080p uploads
     profile = final_profile(MediaInfo(duration=1, width=None if height is None else height * 2, height=height))
 
-    assert (profile.width, profile.height) == size and profile.name == "final"
+    assert (profile.width, profile.height) == (1920, 1080) and profile.name == "final"
+    assert profile.video_bitrate == "10M" and profile.sharpen
+
+
+def test_final_render_uses_the_bitrate_and_sharpens() -> None:
+    from recap.fit import Segment, TimelineEntry
+    from recap.render import item_args
+
+    entry = TimelineEntry("L1", "original", 0.0, 4.0, [Segment(10.0, 14.0)])
+    args = item_args(entry, Path("src.mp4"), None, final_profile(None), 25.0, 0.0, True, True, Path("o.mkv"))
+
+    graph = args[args.index("-filter_complex") + 1]
+    assert "unsharp=" in graph
+    assert args[args.index("-b:v") + 1] == "10M" and args[args.index("-maxrate") + 1] == "12M"
+    assert "-crf" not in args
 
 
 @pytest.mark.integration
@@ -52,15 +65,15 @@ def test_export_writes_srt_final_and_subbed(tmp_path: Path, clip_30s: Path) -> N
     # SRT: L0001 narration starts at 0.1 s
     srt = (out / "recap.srt").read_text(encoding="utf-8")
     assert srt.startswith("1\n00:00:00,100 --> ")
-    # final: from the 1280x720 source, not upscaled; same length as the preview
+    # final: from the 1280x720 source, scaled up to 1080p; same length as the preview
     final = media.probe(out / "recap.mp4")
-    assert (final.width, final.height) == (1280, 720)
+    assert (final.width, final.height) == (1920, 1080)
     assert final.duration == pytest.approx(13.0, abs=0.2)
     subbed = media.probe(out / "recap_subbed.mp4")
-    assert (subbed.width, subbed.height) == (1280, 720)
+    assert (subbed.width, subbed.height) == (1920, 1080)
     assert subbed.duration == pytest.approx(final.duration, abs=0.1)
     # subtitles are burned in during narration (t=1 s) and absent during the original clip (t=8 s)
-    bottom = (0, 560, 1280, 720)
+    bottom = (0, 840, 1920, 1080)
     narr_diff = ImageChops.difference(frame(out / "recap.mp4", 1.0, tmp_path / "a.png"),
                                       frame(out / "recap_subbed.mp4", 1.0, tmp_path / "b.png"))  # fmt: skip
     orig_diff = ImageChops.difference(frame(out / "recap.mp4", 8.0, tmp_path / "c.png"),

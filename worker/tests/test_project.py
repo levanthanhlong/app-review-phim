@@ -86,3 +86,9 @@ def test_load_project_reports_missing(tmp_path: Path) -> None:
     with pytest.raises(config.ProjectError) as exc:
         config.load_project(tmp_path)
     assert exc.value.code == "project_missing"
+
+
+def test_film_sound_is_muted_under_narration_by_default() -> None:
+    from recap.models import Settings
+
+    assert Settings().duck_volume == 0.0

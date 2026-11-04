@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from recap import config, media
+from recap.beat_marks import keep_marks, load_marks, save_marks
 from recap.beats import BeatPlan, Interval, dialogue_between, plan_beats, speech_intervals
 from recap.models import SCENES_ADAPTER, TRANSCRIPT_ADAPTER, Beat, Project, Settings, TranscriptSegment
 from recap.runner import StageContext, StageFailure
@@ -102,9 +103,25 @@ class ScenesStage:
         ctx.emitter.log("info", f"{len(shots)} shot → {len(beats)} beat")
 
         self._write_keyframes(ctx, proxy, beats)
+        self._keep_valid_marks(ctx, beats)
         config.write_json_atomic(ctx.path(SCENES), SCENES_ADAPTER.dump_python(beats, mode="json"))
         ctx.emitter.artifact(self.name, SCENES)
         return ctx.project
+
+    @staticmethod
+    def _keep_valid_marks(ctx: StageContext, beats: list[Beat]) -> None:
+        """New beats can reuse old ids for other footage: keep only the marks of unchanged beats."""
+        marks = load_marks(ctx.project_dir)
+        if not marks:
+            return
+        try:
+            old = SCENES_ADAPTER.validate_json(ctx.path(SCENES).read_bytes())
+        except (FileNotFoundError, ValueError):
+            old = []
+        kept = keep_marks(marks, old, beats)
+        if len(kept) != len(marks):
+            ctx.emitter.log("warning", f"Chia cảnh lại: bỏ {len(marks) - len(kept)} đánh dấu của cảnh đã thay đổi")
+        save_marks(ctx.project_dir, kept)
 
     def _write_keyframes(self, ctx: StageContext, proxy: Path, beats: list[Beat]) -> None:
         """Build all keyframes in keyframes.tmp/, then swap it in so old/new frames never mix."""

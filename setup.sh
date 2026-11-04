@@ -18,6 +18,7 @@ SA3_DIR="$TOOLS/stable-audio-3/optimized/mlx"
 ACE_DIR="$TOOLS/ACE-Step-1.5"
 APP_BUNDLE="$APP_DIR/build/Build/Products/Debug/RecapStudio.app"
 BUNDLE_ID="com.thanhle.RecapStudio"
+EXTERNAL_VOLUME="/Volumes/ExternalSSD"  # big data lives here when it is mounted (internal disk is small)
 
 PYTHON_VERSION="3.12"
 VL_MODEL="qwen2.5vl:7b"
@@ -87,6 +88,27 @@ check_machine() {
     fi
 }
 
+configure_storage() {
+    step "Nơi lưu dữ liệu tải về"
+    if [[ ! -d "$EXTERNAL_VOLUME" ]]; then
+        warn "Không thấy $EXTERNAL_VOLUME: cache và model sẽ nằm ở ổ trong (~/.cache, ~/.ollama)."
+        return
+    fi
+    # Explicit values from the caller win; everything else goes to the external SSD.
+    : "${HF_HOME:=$EXTERNAL_VOLUME/hf-cache}"                    # Whisper, VieNeu, Stable Audio weights
+    : "${OLLAMA_MODELS:=$EXTERNAL_VOLUME/ollama-models}"         # qwen2.5vl
+    : "${UV_CACHE_DIR:=$EXTERNAL_VOLUME/uv-cache}"               # Python packages
+    : "${UV_PYTHON_INSTALL_DIR:=$EXTERNAL_VOLUME/uv-python}"     # Python interpreters uv downloads
+    : "${PIP_CACHE_DIR:=$EXTERNAL_VOLUME/pip-cache}"             # pip inside other tools' install scripts
+    : "${XDG_CACHE_HOME:=$EXTERNAL_VOLUME/cache}"                # torch hub and other ~/.cache users
+    : "${HOMEBREW_CACHE:=$EXTERNAL_VOLUME/homebrew-cache}"       # downloaded bottles (installs stay in brew's prefix)
+    : "${TMPDIR:=$EXTERNAL_VOLUME/tmp}"                          # mktemp, pip/uv build dirs
+    export HF_HOME OLLAMA_MODELS UV_CACHE_DIR UV_PYTHON_INSTALL_DIR PIP_CACHE_DIR XDG_CACHE_HOME HOMEBREW_CACHE TMPDIR
+    mkdir -p "$HF_HOME" "$OLLAMA_MODELS" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR" "$PIP_CACHE_DIR" \
+        "$XDG_CACHE_HOME" "$HOMEBREW_CACHE" "$TMPDIR"
+    ok "Model và cache: $EXTERNAL_VOLUME"
+}
+
 # ---- 2. command-line tools ----------------------------------------------------------
 
 install_tools() {
@@ -123,13 +145,18 @@ setup_worker() {
 # ---- 4. models ----------------------------------------------------------------------
 
 start_ollama() {
-    brew services start ollama >/dev/null 2>&1 || true
+    if ! curl -fsS http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+        # started from this shell so it inherits OLLAMA_MODELS (a `brew services` server would not,
+        # and would pull models onto the internal disk); the worker restarts it on demand later
+        mkdir -p "$REPO/output"
+        nohup ollama serve >"$REPO/output/ollama-serve.log" 2>&1 &
+    fi
     local n
     for n in $(seq 1 30); do
         curl -fsS http://127.0.0.1:11434/api/version >/dev/null 2>&1 && return 0
         sleep 1
     done
-    die "Không khởi động được Ollama (brew services start ollama)."
+    die "Không khởi động được Ollama (xem output/ollama-serve.log)."
 }
 
 download_models() {
@@ -235,6 +262,7 @@ final_check() {
 }
 
 check_machine
+configure_storage
 install_tools
 setup_worker
 if ((SKIP_MODELS)); then warn "Bỏ qua tải model (--skip-models): model sẽ tải ở lần dùng đầu tiên."; else download_models; fi

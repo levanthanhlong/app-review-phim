@@ -19,9 +19,11 @@ from recap.music import music_signature
 from recap.render import PREVIEW
 from recap.runner import StageContext, StageFailure
 from recap.script_model import load_script, validate_items
+from recap.cleanup import load_cleanup
 from recap.timeline_render import (
     RENDER_VERSION,
     RenderJob,
+    cleanup_signature,
     load_branding,
     load_music,
     render_timeline,
@@ -91,7 +93,8 @@ class AssembleStage:
         files = (SCRIPT, MANIFEST, SCENES, PROXY)
         sigs = [config.file_signature(project_dir / f) for f in files]
         s = project.settings
-        extras = [x for x in (music_signature(s, project_dir), brand_signature(s.brand_banner, s.brand_logo)) if x]
+        extras = [x for x in (music_signature(s, project_dir), brand_signature(s.brand_banner, s.brand_logo),
+                             cleanup_signature(project_dir)) if x]  # fmt: skip
         return "|".join([*sigs, str(s.duck_volume), RENDER_VERSION, *extras])
 
     def run(self, ctx: StageContext) -> Project:
@@ -104,7 +107,7 @@ class AssembleStage:
 
         brand = load_branding(ctx.project.settings, ctx.project_dir, PREVIEW)
         job = RenderJob(PREVIEW, ctx.path(PROXY), PREVIEW_OUT, project_fps(ctx.project), ctx.project.settings.duck_volume,
-                        music=music, brand=brand)  # fmt: skip
+                        music=music, brand=brand, cleanup=load_cleanup(ctx.project_dir))  # fmt: skip
         render_timeline(ctx, self.name, timeline, job)
         total = timeline[-1].out_end if timeline else 0.0
         ctx.emitter.log("info", f"Video tóm tắt dài {total:.1f}s ({len(timeline)} dòng)")

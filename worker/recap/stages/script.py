@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
@@ -17,7 +18,8 @@ from typing import Any
 import yaml
 
 from recap import config
-from recap.digest import digest_text, split_parts
+from recap.beat_marks import apply_marks, auto_skips, effective_marks, marks_signature
+from recap.digest import IMPORTANT_FLAG, digest_text, split_parts
 from recap.llm import LLMError, LLMProvider, get_provider
 from recap.models import DESCRIBED_ADAPTER, DescribedBeat, Project, Settings
 from recap.runner import StageContext, StageFailure
@@ -29,14 +31,22 @@ DESCRIBED = "work/scenes_described.json"
 SCRIPT = "script.yaml"
 DIGEST_DIR = "work/digest"
 PARTS_DIR = "work/script_parts"
+BACKUP_DIR = "work/script_backups"
 MAX_RETRIES = 2
 FIRST_PART_SUMMARY = "(đây là phần đầu tiên)"
 SPEED_TOLERANCE = 0.15  # a voice this close to the speed the script was written for still fits it
+MAX_CLIP_SEC = 8.0  # one piece of film under narration
+MAX_ORIGINAL_SEC = 10.0  # one stretch of the film's own sound and picture
 STYLES = {
     "kich_tinh": "kịch tính, lôi cuốn",
     "nghiem_tuc": "nghiêm túc, mạch lạc",
     "hai_mia_mai": "hài hước, mỉa mai",
 }
+# Added to a part's prompt only when it has beats starred in the Scene Browser.
+STAR_RULE = (
+    f"\n\nBeat có dấu \"{IMPORTANT_FLAG}\" là cảnh người làm video muốn giữ: "
+    "hãy đưa các beat đó vào kịch bản (lời kể hoặc original)."
+)
 
 ProviderFactory = Callable[[Settings], LLMProvider]
 SpeechRate = Callable[[Settings], float]
@@ -122,10 +132,12 @@ class ScriptStage:
         prompt_hash = hashlib.sha256((_template() + _guide()).encode()).hexdigest()[:12]
         speed = f"{self._fingerprint_speed(project_dir, s):.2f}"  # a much faster/slower voice needs other text
         fields = [s.target_ratio, s.narration_style, s.llm_provider, s.claude_model, s.part_size_min, duration, speed]
-        return "|".join([config.file_signature(project_dir / DESCRIBED), prompt_hash, *map(str, fields)])
+        marks = marks_signature(project_dir)  # only when the user marked beats
+        extras = [f"beat_marks:{marks}"] if marks else []
+        return "|".join([config.file_signature(project_dir / DESCRIBED), prompt_hash, *map(str, fields), *extras])
 
     def run(self, ctx: StageContext) -> Project:
-        beats = self._load_beats(ctx)
+        beats, starred = self._load_beats(ctx)
         settings = ctx.project.settings
         total_duration = ctx.project.media.duration if ctx.project.media else beats[-1].end
         total_target = round(total_duration * settings.target_ratio)
@@ -146,7 +158,7 @@ class ScriptStage:
         summary = FIRST_PART_SUMMARY
         for index, (part, target) in enumerate(zip(parts, targets), start=1):
             ctx.emitter.progress(self.name, index - 1, len(parts), f"Phần {index}/{len(parts)}")
-            items, summary = self._part(ctx, provider, part, index, len(parts), target, summary, speed)
+            items, summary = self._part(ctx, provider, part, index, len(parts), target, summary, speed, starred)
             all_items.extend(items)
 
         script = {
@@ -159,20 +171,43 @@ class ScriptStage:
                 for n, item in enumerate(all_items, start=1)
             ],
         }
-        config.write_text_atomic(ctx.path(SCRIPT), _dump_yaml(script))
+        text = _dump_yaml(script)
+        self._back_up_previous(ctx, text)
+        config.write_text_atomic(ctx.path(SCRIPT), text)
         ctx.emitter.progress(self.name, len(parts), len(parts), "Xong")
         ctx.emitter.log("info", f"{len(parts)} phần, {len(all_items)} dòng kịch bản, mục tiêu {total_target}s")
         ctx.emitter.artifact(self.name, SCRIPT)
         return ctx.project
 
-    def _load_beats(self, ctx: StageContext) -> list[DescribedBeat]:
+    @staticmethod
+    def _back_up_previous(ctx: StageContext, new_text: str) -> None:
+        """Keep the script being replaced (it may hold edits from the Script Editor)."""
+        try:
+            old_text = ctx.path(SCRIPT).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        if old_text == new_text:
+            return
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup = f"{BACKUP_DIR}/script_{stamp}.yaml"
+        ctx.path(BACKUP_DIR).mkdir(parents=True, exist_ok=True)
+        config.write_text_atomic(ctx.path(backup), old_text)
+        ctx.emitter.log("warning", f"Kịch bản cũ (kể cả phần đã sửa tay) được lưu lại ở {backup}")
+
+    def _load_beats(self, ctx: StageContext) -> tuple[list[DescribedBeat], frozenset[str]]:
+        """The described beats minus the skipped ones (marked, or flagged by `inspect`), and the starred ids."""
         path = ctx.path(DESCRIBED)
         if not path.is_file():
             raise StageFailure("input_missing", "Thiếu scenes_described.json, hãy chạy lại stage describe")
         beats = DESCRIBED_ADAPTER.validate_json(path.read_bytes())
         if not beats:
             raise StageFailure("input_missing", "scenes_described.json không có beat nào")
-        return beats
+        kept, starred = apply_marks(beats, effective_marks(ctx.project_dir))
+        if not kept:
+            auto = len(auto_skips(ctx.project_dir).keys() & {b.id for b in beats})
+            hint = (f" ({auto} cảnh do bước Kiểm tra nguồn tự bỏ: bấm “Vẫn dùng cảnh này” ở tab Cảnh)" if auto else "")
+            raise StageFailure("input_missing", f"Mọi cảnh đều bị bỏ qua{hint}, hãy bỏ đánh dấu bớt")
+        return kept, starred
 
     def _part(
         self,
@@ -184,8 +219,9 @@ class ScriptStage:
         target: float,
         previous_summary: str,
         speed: float,
+        starred: frozenset[str] = frozenset(),
     ) -> tuple[list[Item], str]:
-        digest = digest_text(beats)
+        digest = digest_text(beats, starred)
         config.write_text_atomic(ctx.path(f"{DIGEST_DIR}/part_{index:02d}.txt"), digest)
         settings = ctx.project.settings
         prompt = _fill(_template(), {
@@ -198,6 +234,8 @@ class ScriptStage:
             "words_per_sec": format_rate(speed),
             "guide": _guide(),
         })  # fmt: skip
+        if any(b.id in starred for b in beats):
+            prompt += STAR_RULE
         key = hashlib.sha256(f"{settings.claude_model}\n{prompt}\n{digest}".encode()).hexdigest()[:16]
         part_file = ctx.path(f"{PARTS_DIR}/part_{index:02d}.yaml")
         cached = self._load_part(part_file, key)
@@ -239,7 +277,8 @@ class ScriptStage:
                 raise StageFailure(exc.code, exc.message, exc.retryable) from exc
             try:
                 data, summary = parse_response(answer)
-                items, errors = validate_items(data, beats, target, words_per_sec=speed)
+                items, errors = validate_items(data, beats, target, words_per_sec=speed,
+                                               max_clip_sec=MAX_CLIP_SEC, max_original_sec=MAX_ORIGINAL_SEC)  # fmt: skip
             except ValueError as exc:
                 items, summary, errors = [], "", [str(exc)]
             if not errors:

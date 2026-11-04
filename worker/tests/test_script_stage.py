@@ -272,3 +272,149 @@ def test_editing_the_guide_rewrites_script(tmp_path: Path, monkeypatch: pytest.M
     # Assert
     assert ok and events[-1]["skipped"] is False and len(llm.prompts) == 1
     assert "bản mới" in llm.prompts[0]
+
+
+# ---- beats marked in the Scene Browser (work/beat_marks.json) -----------------------------
+
+
+def write_marks(project_dir: Path, marks: dict[str, str]) -> None:
+    (project_dir / "work/beat_marks.json").write_text(json.dumps(marks))
+
+
+def test_skipped_beats_are_left_out_of_the_digest(tmp_path: Path) -> None:
+    # Arrange
+    project_dir = make_project(tmp_path)
+    write_marks(project_dir, {"B0002": "skip"})
+    llm = FakeLLM([GOOD])
+
+    # Act
+    ok, _ = run(project_dir, llm)
+
+    # Assert
+    assert ok
+    assert "B0002" not in llm.inputs[0]
+    assert "B0001" in llm.inputs[0] and "B0003" in llm.inputs[0]
+
+
+def test_a_skipped_beat_cannot_be_used_by_the_script(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    write_marks(project_dir, {"B0001": "skip"})
+    llm = FakeLLM([GOOD, GOOD.replace("B0001", "B0002").replace('"00:00:01"', '"00:00:11"').replace('"00:00:05"', '"00:00:15"')])
+
+    ok, _ = run(project_dir, llm)
+
+    assert ok and len(llm.prompts) == 2
+    assert "B0001 không có trong đầu vào" in llm.prompts[1]
+
+
+def test_beats_flagged_by_inspect_are_left_out_unless_kept(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    (project_dir / "work/inspect.json").write_text(json.dumps({"skip_beats": {"B0001": "credit", "B0002": "quảng cáo"}}))
+    write_marks(project_dir, {"B0002": "keep"})
+    llm = FakeLLM([GOOD.replace("B0001", "B0002").replace('"00:00:01"', '"00:00:11"').replace('"00:00:05"', '"00:00:15"')])
+
+    ok, _ = run(project_dir, llm)
+
+    assert ok and "B0001" not in llm.inputs[0] and "B0002" in llm.inputs[0]
+
+
+def test_every_beat_skipped_says_which_were_skipped_by_inspect(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    (project_dir / "work/inspect.json").write_text(json.dumps({"skip_beats": {"B0001": "credit", "B0002": "credit"}}))
+    write_marks(project_dir, {"B0003": "skip"})
+
+    ok, events = run(project_dir, FakeLLM([]))
+
+    assert not ok
+    error = next(e for e in events if e["type"] == "error")
+    assert "2 cảnh do bước Kiểm tra nguồn tự bỏ" in error["message"]
+
+
+def test_starred_beats_are_flagged_and_the_prompt_explains_the_flag(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    write_marks(project_dir, {"B0002": "star"})
+    llm = FakeLLM([GOOD])
+
+    ok, _ = run(project_dir, llm)
+
+    assert ok
+    flagged = [line for line in llm.inputs[0].splitlines() if "⭐" in line]
+    assert len(flagged) == 1 and flagged[0].startswith("[B0002 ")
+    assert "⭐ QUAN TRỌNG" in llm.prompts[0]
+
+
+def test_prompt_has_no_star_rule_without_starred_beats(tmp_path: Path) -> None:
+    llm = FakeLLM([GOOD])
+
+    run(make_project(tmp_path), llm)
+
+    assert "⭐" not in llm.prompts[0] and "⭐" not in llm.inputs[0]
+
+
+def test_marking_a_beat_rewrites_the_script(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    run(project_dir, FakeLLM([GOOD]))
+    write_marks(project_dir, {"B0003": "star"})
+
+    llm = FakeLLM([GOOD])
+    _, events = run(project_dir, llm)
+
+    assert events[-1]["skipped"] is False and len(llm.prompts) == 1
+
+
+def test_fingerprint_without_marks_is_unchanged_by_the_marks_feature(tmp_path: Path) -> None:
+    # projects made before beat marks existed must not see their script as outdated
+    project_dir = make_project(tmp_path)
+    stage = ScriptStage(speech_rate=lambda settings: 3.0)
+
+    fingerprint = stage.fingerprint(project_dir, config.load_project(project_dir))
+
+    assert "beat_marks" not in fingerprint
+
+
+def test_marks_file_without_marks_keeps_old_fingerprint(tmp_path: Path) -> None:
+    # starring a beat and then clearing it leaves "{}": the script must not count as outdated
+    project_dir = make_project(tmp_path)
+    stage = ScriptStage(speech_rate=lambda settings: 3.0)
+    before = stage.fingerprint(project_dir, config.load_project(project_dir))
+
+    write_marks(project_dir, {})
+
+    assert stage.fingerprint(project_dir, config.load_project(project_dir)) == before
+
+
+def test_rewriting_the_same_marks_keeps_the_fingerprint(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    stage = ScriptStage(speech_rate=lambda settings: 3.0)
+    write_marks(project_dir, {"B0002": "star", "B0001": "skip"})
+    before = stage.fingerprint(project_dir, config.load_project(project_dir))
+
+    write_marks(project_dir, {"B0001": "skip", "B0002": "star"})  # same marks, new mtime and order
+
+    assert stage.fingerprint(project_dir, config.load_project(project_dir)) == before
+
+
+def test_rerun_backs_up_the_previous_script(tmp_path: Path) -> None:
+    # Arrange: a script edited by hand (Script Editor) after the first run
+    project_dir = make_project(tmp_path)
+    run(project_dir, FakeLLM([GOOD]))
+    edited = (project_dir / "script.yaml").read_text().replace("chú cóc nhỏ", "chú cóc đã sửa tay")
+    (project_dir / "script.yaml").write_text(edited)
+
+    # Act
+    ok, events = run(project_dir, FakeLLM([GOOD]), force=True)
+
+    # Assert: the new script replaced it, the edited one is kept and the user is told where
+    assert ok and "đã sửa tay" not in (project_dir / "script.yaml").read_text()
+    backups = list((project_dir / "work/script_backups").glob("script_*.yaml"))
+    assert len(backups) == 1 and backups[0].read_text() == edited
+    assert any(e["type"] == "log" and "script_backups" in e["message"] for e in events)
+
+
+def test_rerun_with_an_identical_script_makes_no_backup(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    run(project_dir, FakeLLM([GOOD]))
+
+    run(project_dir, FakeLLM([GOOD]), force=True)
+
+    assert not (project_dir / "work/script_backups").exists()

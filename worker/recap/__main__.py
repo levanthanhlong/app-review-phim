@@ -10,6 +10,12 @@ Commands:
   music-choose --project DIR --cue M01 --option N   use option N (0-based) of an AI music cue
   music-edit --project DIR --cue M01 [--prompt P] [--alt-prompt P] [--reroll]
                                                     change a cue's prompts / ask for new options
+  script-show --project DIR                         script.yaml as JSON (times in seconds)
+  script-save --project DIR --file EDIT.json        validate and save edited lines ({"items": [...]})
+  script-rewrite --project DIR --line L0001 [--hint H]
+                                                    ask Claude for a better version of one line
+  beat-mark --project DIR --beat B0001 --mark star|skip|keep|none
+                                                    mark a beat for the script stage
   <stage>  --project DIR [--force]                  run one stage
   run      --project DIR [--from S] [--to S] [--force]
 """
@@ -17,12 +23,14 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import unicodedata
 from dataclasses import asdict
 from pathlib import Path
 
-from recap import config, doctor, music_edit, settings_update, voices
+from recap import config, doctor, music_edit, script_edit, settings_update, voices
+from recap.beat_marks import auto_skips, load_marks
 from recap.events import Emitter, take_protocol_stdout
 from recap.models import STAGE_NAMES
 from recap.runner import Cancelled, install_signal_handlers, run_stage
@@ -72,6 +80,23 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument("--prompt")
     edit.add_argument("--alt-prompt", dest="alt_prompt")
     edit.add_argument("--reroll", action="store_true", help="tạo 3 bản mới (seed khác)")
+
+    show = sub.add_parser("script-show", help="kịch bản dạng JSON cho Script Editor")
+    show.add_argument("--project", required=True, type=Path)
+
+    save = sub.add_parser("script-save", help="lưu kịch bản đã sửa")
+    save.add_argument("--project", required=True, type=Path)
+    save.add_argument("--file", required=True, type=Path, help='JSON {"items": [...]}')
+
+    rewrite = sub.add_parser("script-rewrite", help="nhờ Claude viết lại một câu kể")
+    rewrite.add_argument("--project", required=True, type=Path)
+    rewrite.add_argument("--line", required=True)
+    rewrite.add_argument("--hint", default="", help="gợi ý thêm cho Claude")
+
+    mark = sub.add_parser("beat-mark", help="đánh dấu beat quan trọng / bỏ qua")
+    mark.add_argument("--project", required=True, type=Path)
+    mark.add_argument("--beat", required=True)
+    mark.add_argument("--mark", required=True, choices=("star", "skip", "keep", "none"))
 
     for name in STAGE_NAMES:
         stage = sub.add_parser(name, help=f"chạy stage {name}")
@@ -160,6 +185,36 @@ def cmd_music(args: argparse.Namespace, emitter: Emitter) -> int:
     return EXIT_OK
 
 
+def _edit_file_items(path: Path) -> list:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise script_edit.ScriptEditError("script_invalid", f"Không đọc được {path.name}: {exc}") from exc
+    items = data.get("items") if isinstance(data, dict) else None
+    return items if isinstance(items, list) else []
+
+
+def cmd_script(args: argparse.Namespace, emitter: Emitter) -> int:
+    try:
+        if args.command == "script-show":
+            data = script_edit.show_script(args.project)
+        elif args.command == "script-save":
+            data = {"stale": script_edit.save_script(args.project, _edit_file_items(args.file), STAGES)}
+        elif args.command == "script-rewrite":
+            data = {"line": args.line, "text": script_edit.rewrite_line(args.project, args.line, hint=args.hint)}
+        else:
+            stale = script_edit.mark_beat(args.project, args.beat, args.mark, STAGES)
+            data = {"stale": stale, "marks": load_marks(args.project), "auto_skips": auto_skips(args.project)}
+    except script_edit.ScriptEditError as exc:
+        emitter.error(None, exc.code, exc.message, retryable=exc.retryable)
+        return EXIT_FAILED
+    except config.ProjectError as exc:
+        emitter.error(None, exc.code, exc.message, retryable=False)
+        return EXIT_FAILED
+    emitter.result(args.command, data)
+    return EXIT_OK
+
+
 def cmd_run(args: argparse.Namespace, emitter: Emitter) -> int:
     start, end = STAGE_NAMES.index(args.from_stage), STAGE_NAMES.index(args.to_stage)
     for name in STAGE_NAMES[start : end + 1]:
@@ -190,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_voice_preview(args, emitter)
         if args.command in ("music-choose", "music-edit"):
             return cmd_music(args, emitter)
+        if args.command in ("script-show", "script-save", "script-rewrite", "beat-mark"):
+            return cmd_script(args, emitter)
         ok = run_stage(args.project, args.command, STAGES, emitter, force=args.force)
         return EXIT_OK if ok else EXIT_FAILED
     except Cancelled:

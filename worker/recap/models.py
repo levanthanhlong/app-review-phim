@@ -13,6 +13,7 @@ STAGE_NAMES: tuple[str, ...] = (
     "ingest",
     "transcribe",
     "scenes",
+    "inspect",
     "describe",
     "script",
     "tts",
@@ -73,7 +74,8 @@ class Settings(Frozen):
     scene_threshold: float | None = None  # None = PySceneDetect default for the detector
     llm_provider: str = "claude_cli"
     claude_model: str = "sonnet"
-    duck_volume: float = 0.15
+    # Film sound under narration (0 = muted; it fades back in for `original` lines).
+    duck_volume: float = 0.0
     # Background music (absolute path to an audio file, None = no music) and its levels:
     # under narration, and with nobody talking.
     music_file: str | None = None

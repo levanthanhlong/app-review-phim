@@ -4,6 +4,8 @@ For a `narrate` line the output length is TTS length + PAD_SEC. Clips are used i
   surplus  -> cut the tail ("trimmed" when more than TRIM_REPORT_SEC is dropped)
   shortage -> 1) extend the last clip forward to the end of its beat
               2) extend the first clip backward to the start of its beat
+                 (an extended clip never gets longer than MAX_SEGMENT_SEC: long unbroken
+                 stretches of the film are avoided)
               3) slow the footage down, not below MIN_SPEED
               4) still short -> "short" (the renderer holds the last frame)
 An `original` line keeps its footage and sound as-is.
@@ -19,6 +21,7 @@ from recap.models import Beat
 from recap.script_model import PAD_SEC, parse_tc
 
 MIN_SPEED = 0.85
+MAX_SEGMENT_SEC = 8.0  # longest piece of film an extension may produce
 TRIM_REPORT_SEC = 1.0
 EPS = 1e-6
 DECIMALS = 3
@@ -81,12 +84,12 @@ def _take(spans: list[tuple[float, float]], needed: float) -> list[tuple[float, 
 
 def _extend(spans: list[tuple[float, float]], beats: list[Beat], shortage: float) -> list[tuple[float, float]]:
     (last_start, last_end), last_beat = spans[-1], beats[-1]
-    new_end = min(last_beat.end, last_end + shortage)
+    new_end = max(last_end, min(last_beat.end, last_end + shortage, last_start + MAX_SEGMENT_SEC))
     spans = [*spans[:-1], (last_start, new_end)]
     shortage -= new_end - last_end
     if shortage > EPS:
         (first_start, first_end), first_beat = spans[0], beats[0]
-        new_start = max(first_beat.start, first_start - shortage)
+        new_start = min(first_start, max(first_beat.start, first_start - shortage, first_end - MAX_SEGMENT_SEC))
         spans = [(new_start, first_end), *spans[1:]]
     return spans
 

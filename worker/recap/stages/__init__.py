@@ -7,6 +7,7 @@ from recap.stages.assemble import AssembleStage
 from recap.stages.describe import DescribeStage
 from recap.stages.export import ExportStage
 from recap.stages.ingest import IngestStage
+from recap.stages.inspect import InspectStage
 from recap.stages.music import MusicStage
 from recap.stages.scenes import ScenesStage
 from recap.stages.script import ScriptStage
@@ -19,6 +20,7 @@ STAGES: dict[str, Stage] = {
         IngestStage(),
         TranscribeStage(),
         ScenesStage(),
+        InspectStage(),
         DescribeStage(),
         ScriptStage(),
         TTSStage(),

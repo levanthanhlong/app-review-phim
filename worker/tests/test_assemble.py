@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 from recap import config, media
+from recap.cleanup import SourceCleanup
 from recap.fit import Segment, TimelineEntry
+from recap.inspect_rules import Region
 from recap.models import StageStatus
 from recap.render import PREVIEW, duck_expression, item_args
 from tests.conftest import HAS_FFMPEG, make_clip
@@ -160,3 +162,43 @@ def test_missing_tts_file_fails_clearly(tmp_path: Path, clip_30s: Path) -> None:
 
     assert code != 0
     assert next(e for e in events if e["type"] == "error")["code"] == "input_missing"
+
+
+def test_join_normalizes_loudness_to_minus_14_lufs() -> None:
+    from recap.render import concat_args
+
+    args = concat_args(Path("list.txt"), Path("out.mp4"))
+
+    assert "loudnorm=I=-14" in args[args.index("-af") + 1]
+
+
+def test_item_args_clean_every_segment_before_scaling() -> None:
+    entry = TimelineEntry("L0001", "original", 0.0, 2.0, [Segment(1.0, 2.0), Segment(5.0, 6.0)])
+    cleanup = SourceCleanup(blurs=(Region(0.05, 0.8, 0.3, 0.2),), crop=Region(0.0, 0.125, 1.0, 0.75))
+
+    graph = item_args(entry, Path("s.mp4"), None, PREVIEW, 25, 0.0, True, True, Path("o.mkv"), cleanup=cleanup)
+    graph = graph[graph.index("-filter_complex") + 1]
+
+    for i in (0, 1):  # each segment has its own (uniquely named) cleanup, before the scale
+        chain = graph[graph.index(f"[{i}:v]"):graph.index(f"[v{i}]")]
+        assert "boxblur" in chain and "crop=w=iw*1:h=ih*0.75" in chain
+        assert chain.index("crop=w=iw*1:h=ih*0.75") < chain.index("scale=")
+    assert graph.count("split=2") == 2
+
+
+@pytest.mark.integration
+def test_assemble_rerenders_when_the_inspect_report_changes_the_cleanup(tmp_path: Path, clip_30s: Path) -> None:
+    # Arrange
+    project_dir = prepared_project(tmp_path, clip_30s)
+    assert run_cli("assemble", "--project", str(project_dir))[0] == 0
+    report = {"watermarks": [{"x": 0.05, "y": 0.8, "w": 0.3, "h": 0.15, "text": "kenh"}], "letterbox": None,
+              "skip_beats": {}}  # fmt: skip
+    (project_dir / "work/inspect.json").write_text(json.dumps(report))
+
+    # Act
+    code, events = run_cli("assemble", "--project", str(project_dir))
+
+    # Assert
+    assert code == 0, events
+    assert events[-1]["skipped"] is False
+    assert "3 dòng mới" in logs(events)

@@ -59,11 +59,17 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGINT, handler)
 
 
+# Stages the next one can do without: `inspect` only adds skips and cleanup (and projects made
+# before it existed have it pending), so `describe` needs `scenes`.
+OPTIONAL_STAGES = frozenset({"inspect"})
+
+
 def check_dependency(project: Project, name: str) -> None:
     index = STAGE_NAMES.index(name)
-    if index == 0:
+    earlier = [s for s in STAGE_NAMES[:index] if s not in OPTIONAL_STAGES]
+    if not earlier:
         return
-    previous = STAGE_NAMES[index - 1]
+    previous = earlier[-1]
     # STALE: outputs exist but are outdated; running on them is allowed (the user decides)
     if project.stages[previous].status not in (StageStatus.DONE, StageStatus.STALE):
         raise StageFailure("dependency_not_done", f"Stage '{previous}' phải chạy xong trước '{name}'")

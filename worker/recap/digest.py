@@ -9,15 +9,17 @@ from recap.script_model import format_tc
 
 SECONDS_PER_MINUTE = 60
 NO_DIALOGUE = "(không có)"
+IMPORTANT_FLAG = "⭐ QUAN TRỌNG"
 
 
-def digest_line(beat: DescribedBeat) -> str:
+def digest_line(beat: DescribedBeat, important: bool = False) -> str:
     dialogue = f'"{beat.dialogue.strip()}"' if beat.dialogue.strip() else NO_DIALOGUE
-    return f"[{beat.id} {format_tc(beat.start)}-{format_tc(beat.end)}] Hình: {beat.desc} | Thoại: {dialogue}"
+    flag = f" | {IMPORTANT_FLAG}" if important else ""
+    return f"[{beat.id} {format_tc(beat.start)}-{format_tc(beat.end)}] Hình: {beat.desc} | Thoại: {dialogue}{flag}"
 
 
-def digest_text(beats: Sequence[DescribedBeat]) -> str:
-    return "\n".join(digest_line(b) for b in beats)
+def digest_text(beats: Sequence[DescribedBeat], starred: frozenset[str] = frozenset()) -> str:
+    return "\n".join(digest_line(b, b.id in starred) for b in beats)
 
 
 def split_parts(beats: Sequence[DescribedBeat], part_size_min: float) -> list[list[DescribedBeat]]:

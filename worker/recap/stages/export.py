@@ -23,9 +23,11 @@ from recap.script_model import load_script
 from recap.stages.assemble import MANIFEST, SCRIPT, TIMELINE, project_fps
 from recap.subtitle_images import SubtitleError, overlay_concat, resolve_font
 from recap.subtitles import Cue, build_cues, to_srt
+from recap.cleanup import load_cleanup
 from recap.timeline_render import (
     RENDER_VERSION,
     RenderJob,
+    cleanup_signature,
     load_branding,
     load_music,
     render_timeline,
@@ -36,20 +38,21 @@ FINAL_OUT = "output/recap.mp4"
 SUBBED_OUT = "output/recap_subbed.mp4"
 SUBS_DIR = "work/subs"
 SUBS_VERSION = "2"  # bump when subtitle layout/style changes
-FINAL_MAX_HEIGHT = 1080
+FINAL_HEIGHT = 1080
+FINAL_BITRATE = "10M"  # 8–12 Mbps for 1080p uploads
+FINAL_MAX_BITRATE = "12M"
 FINAL_CRF = 20
 FINAL_PRESET = "medium"
 ASPECT = 16 / 9
 
 
 def final_profile(media_info: MediaInfo | None) -> RenderProfile:
-    """16:9 frame of the source's height, capped at 1080p (upscaling only costs size)."""
-    source_height = media_info.height if media_info and media_info.height else FINAL_MAX_HEIGHT
-    height = min(FINAL_MAX_HEIGHT, source_height)
-    height -= height % 2
+    """Always 1080p 16:9 at FINAL_BITRATE: smaller sources are scaled up (lanczos, light sharpening),
+    since the platforms favour 1080p uploads. `media_info` is kept for callers (resolution checks)."""
+    height = FINAL_HEIGHT
     width = round(height * ASPECT)
-    width += width % 2
-    return RenderProfile("final", width, height, crf=FINAL_CRF, preset=FINAL_PRESET)
+    return RenderProfile("final", width, height, crf=FINAL_CRF, preset=FINAL_PRESET,
+                         video_bitrate=FINAL_BITRATE, max_bitrate=FINAL_MAX_BITRATE, sharpen=True)  # fmt: skip
 
 
 def _audio_stream(project: Project) -> int:
@@ -64,7 +67,7 @@ def _subbed_args(video: Path, listing: Path, profile: RenderProfile, out: Path) 
         "-i", str(video), "-f", "concat", "-safe", "0", "-i", str(listing),
         "-filter_complex", "[1:v]format=rgba[subs];[0:v][subs]overlay=0:0:eof_action=pass:format=auto,format=yuv420p[v]",
         "-map", "[v]", "-map", "0:a",
-        "-c:v", "libx264", "-preset", profile.preset, "-crf", str(profile.crf),
+        *profile.video_codec_args(),
         "-c:a", "copy", "-movflags", "+faststart",
         str(out),
     ]  # fmt: skip
@@ -85,7 +88,8 @@ class ExportStage:
         profile = final_profile(project.media)
         sigs = [config.file_signature(project_dir / f) for f in (TIMELINE, SCRIPT, MANIFEST)]
         fields = [f"{profile.width}x{profile.height}", s.subtitle_font, str(s.duck_volume), str(_audio_stream(project))]
-        extras = [x for x in (music_signature(s, project_dir), brand_signature(s.brand_banner, s.brand_logo)) if x]
+        extras = [x for x in (music_signature(s, project_dir), brand_signature(s.brand_banner, s.brand_logo),
+                             cleanup_signature(project_dir)) if x]  # fmt: skip
         return "|".join([*sigs, config.file_signature(source), *fields, RENDER_VERSION, SUBS_VERSION, *extras])
 
     def run(self, ctx: StageContext) -> Project:
@@ -111,7 +115,7 @@ class ExportStage:
         ctx.emitter.log("info", f"Render bản cuối {profile.width}x{profile.height} từ phim gốc")
         brand = load_branding(ctx.project.settings, ctx.project_dir, profile)
         job = RenderJob(profile, source, FINAL_OUT, project_fps(ctx.project), ctx.project.settings.duck_volume,
-                        _audio_stream(ctx.project), music, brand)  # fmt: skip
+                        _audio_stream(ctx.project), music, brand, load_cleanup(ctx.project_dir))  # fmt: skip
         render_timeline(ctx, self.name, timeline, job)
         ctx.emitter.artifact(self.name, FINAL_OUT)
 

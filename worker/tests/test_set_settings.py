@@ -73,7 +73,7 @@ def test_changing_voice_marks_tts_and_everything_after_stale(tmp_path: Path) -> 
 
     assert settings.voice == "Đức Trí"
     assert stale == ["tts", "music", "assemble", "export"]
-    assert statuses(project_dir) == {"ingest": "done", "transcribe": "done", "scenes": "done", "describe": "done",
+    assert statuses(project_dir) == {"ingest": "done", "transcribe": "done", "scenes": "done", "inspect": "done", "describe": "done",
                                      "script": "done", "tts": "stale", "music": "stale", "assemble": "stale",
                                      "export": "stale"}  # fmt: skip
 

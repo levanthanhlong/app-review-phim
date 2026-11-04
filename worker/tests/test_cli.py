@@ -237,3 +237,28 @@ def test_voice_preview_makes_a_wav(tmp_path: Path) -> None:
     assert code == 0, evs
     data = evs[-1]["data"]
     assert data["file"] == str(out) and 0.3 < data["duration"] < 5 and out.is_file()
+
+
+def test_describe_needs_scenes_not_the_optional_inspect_stage(tmp_path: Path) -> None:
+    # a project made before `inspect` existed: scenes done, inspect pending
+    movie = tmp_path / "m.mp4"
+    movie.write_bytes(b"x")
+    project_dir = config.create_project(tmp_path / "r", title="A", source=movie)
+    project = config.load_project(project_dir)
+    done = project.stages["scenes"].model_copy(update={"status": StageStatus.DONE})
+    config.save_project(project_dir, project.with_stage("scenes", done))
+
+    describe_check = _dependency_error(config.load_project(project_dir), "describe")
+    inspect_check = _dependency_error(config.load_project(project_dir), "inspect")
+
+    assert describe_check is None and inspect_check is None
+
+
+def _dependency_error(project, name: str) -> str | None:  # type: ignore[no-untyped-def]
+    from recap.runner import StageFailure, check_dependency
+
+    try:
+        check_dependency(project, name)
+    except StageFailure as exc:
+        return exc.code
+    return None

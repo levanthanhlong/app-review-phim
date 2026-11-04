@@ -79,9 +79,11 @@ def parse_response(text: str) -> tuple[Any, str]:
 # ---- validation -------------------------------------------------------------------
 
 def _check_range(
-    where: str, beat_id: object, start: object, end: object, beats: Mapping[str, Beat], errors: list[str]
-) -> tuple[str, str] | None:
-    """Validate a (beat, start, end) reference; returns normalized timecodes or None if invalid."""
+    where: str, beat_id: object, start: object, end: object, beats: Mapping[str, Beat], errors: list[str],
+    max_sec: float | None = None, too_long: str = "",
+) -> tuple[str, str] | None:  # fmt: skip
+    """Validate a (beat, start, end) reference; returns normalized timecodes or None if invalid.
+    With `max_sec`, a longer range is an error (`too_long` says what to do instead)."""
     beat = beats.get(str(beat_id))
     if beat is None:
         errors.append(f"{where}: beat {beat_id} không có trong đầu vào")
@@ -102,10 +104,15 @@ def _check_range(
     if e <= s:
         errors.append(f"{where}: mốc kết thúc phải sau mốc bắt đầu")
         return None
+    if max_sec is not None and e - s > max_sec + BEAT_EDGE_TOLERANCE_SEC:
+        errors.append(f"{where}: dài {e - s:.1f} giây, tối đa {max_sec:g} giây{too_long}")
+        return None
     return format_tc(s), format_tc(e)
 
 
-def _validate_narrate(where: str, raw: Mapping[str, Any], beats: Mapping[str, Beat], errors: list[str]) -> Item | None:
+def _validate_narrate(
+    where: str, raw: Mapping[str, Any], beats: Mapping[str, Beat], errors: list[str], max_clip_sec: float | None = None
+) -> Item | None:
     text = str(raw.get("text") or "").strip()
     clips_raw = raw.get("clips")
     if not text:
@@ -118,7 +125,8 @@ def _validate_narrate(where: str, raw: Mapping[str, Any], beats: Mapping[str, Be
         if not isinstance(clip, Mapping):
             errors.append(f"{where} clip {j}: phải có beat, start, end")
             continue
-        times = _check_range(f"{where} clip {j}", clip.get("beat"), clip.get("start"), clip.get("end"), beats, errors)
+        times = _check_range(f"{where} clip {j}", clip.get("beat"), clip.get("start"), clip.get("end"), beats, errors,
+                             max_clip_sec, ": hãy tách thành nhiều clip ngắn ở các khoảnh khắc khác nhau")  # fmt: skip
         if times:
             clips.append({"beat": str(clip["beat"]), "start": times[0], "end": times[1]})
     if not text or len(clips) != len(clips_raw):
@@ -126,8 +134,11 @@ def _validate_narrate(where: str, raw: Mapping[str, Any], beats: Mapping[str, Be
     return {"type": "narrate", "text": text, "clips": clips}
 
 
-def _validate_original(where: str, raw: Mapping[str, Any], beats: Mapping[str, Beat], errors: list[str]) -> Item | None:
-    times = _check_range(where, raw.get("beat"), raw.get("start"), raw.get("end"), beats, errors)
+def _validate_original(
+    where: str, raw: Mapping[str, Any], beats: Mapping[str, Beat], errors: list[str], max_sec: float | None = None
+) -> Item | None:
+    times = _check_range(where, raw.get("beat"), raw.get("start"), raw.get("end"), beats, errors,
+                         max_sec, ": hãy chọn đoạn thoại ngắn hơn")  # fmt: skip
     if times is None:
         return None
     item: Item = {"type": "original", "beat": str(raw["beat"]), "start": times[0], "end": times[1]}
@@ -162,8 +173,12 @@ def validate_items(
     target_sec: float,
     check_duration: bool = True,
     words_per_sec: float = WORDS_PER_SEC,
+    max_clip_sec: float | None = None,
+    max_original_sec: float | None = None,
 ) -> tuple[list[Item], list[str]]:
-    """Validate and normalize items (an existing `id` is kept). Returns (items, errors)."""
+    """Validate and normalize items (an existing `id` is kept). Returns (items, errors).
+    The length limits apply to new scripts from the LLM; None accepts any length (older or
+    hand-edited scripts)."""
     raw_items = raw.get("items") if isinstance(raw, Mapping) else raw
     if not isinstance(raw_items, list) or not raw_items:
         return [], ["Không tìm thấy danh sách items (YAML phải có khóa items là một danh sách)"]
@@ -176,9 +191,9 @@ def validate_items(
             continue
         kind = entry.get("type")
         if kind == "narrate":
-            item = _validate_narrate(where, entry, beats, errors)
+            item = _validate_narrate(where, entry, beats, errors, max_clip_sec)
         elif kind == "original":
-            item = _validate_original(where, entry, beats, errors)
+            item = _validate_original(where, entry, beats, errors, max_original_sec)
         else:
             errors.append(f"{where}: type phải là narrate hoặc original (đang là {kind!r})")
             item = None

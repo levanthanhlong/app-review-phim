@@ -2,34 +2,55 @@ import AppKit
 import RecapKit
 import SwiftUI
 
-/// Project screen: header, error banner and stage list scroll together; the log sits below a splitter.
+/// The project screen's tabs (spec §7.2: pipeline, scene browser, script editor, preview & export).
+enum ProjectTab: String, CaseIterable, Identifiable {
+    case pipeline, scenes, script, preview
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .pipeline: "Các bước"
+        case .scenes: "Cảnh"
+        case .script: "Kịch bản"
+        case .preview: "Xem trước"
+        }
+    }
+}
+
+/// Project screen: one tab at a time above the log, which sits below a splitter.
 struct ProjectDetailView: View {
     @Environment(AppModel.self) private var model
     let project: ProjectSummary
+    @State private var tab = ProjectTab.pipeline
     @State private var showSettings = false
     @State private var showLog = false
+    @State private var previewLine: String?  // line to jump to when the preview tab opens
 
     static let logHeight: CGFloat = 220
 
     private var state: ProjectRunState { model.runState(project.id) }
-    private var isBusy: Bool { model.queue.isBusy(project: project.id) }
+    private var isBusy: Bool { model.isBusy(project.id) }
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    ProjectHeader(project: project, showSettings: $showSettings)
-                    if let error = state.lastError, !isBusy {
-                        ErrorBanner(error: error, retry: retry(error))
-                    }
-                    StageList(project: project)
-                    if project.file.settings.musicSource == "ai" {
-                        AIMusicView(project: project)
-                    }
+            Picker("Màn hình", selection: $tab) {
+                ForEach(ProjectTab.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 520)
+            .padding(.vertical, 10)
+            Divider()
+            switch tab {
+            case .pipeline: pipeline
+            case .scenes: SceneBrowserView(project: project)
+            case .script:
+                ScriptEditorView(project: project) { line in
+                    previewLine = line
+                    tab = .preview
                 }
-                .padding(24)
-                .frame(maxWidth: 980, alignment: .leading)
-                .frame(maxWidth: .infinity)
+            case .preview: PreviewView(project: project, focusLine: $previewLine)
             }
             Divider()
             LogPanel(state: state, isExpanded: $showLog)
@@ -39,6 +60,24 @@ struct ProjectDetailView: View {
         .onAppear { showLog = state.isActive }
         .onChange(of: state.isActive) { _, active in if active { showLog = true } }
         .sheet(isPresented: $showSettings) { ProjectSettingsSheet(project: project) }
+    }
+
+    private var pipeline: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                ProjectHeader(project: project, showSettings: $showSettings)
+                if let error = state.lastError, !isBusy {
+                    ErrorBanner(error: error, retry: retry(error))
+                }
+                StageList(project: project)
+                if project.file.settings.musicSource == "ai" {
+                    AIMusicView(project: project)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
     }
 
     private func retry(_ error: StageFailureInfo) -> (() -> Void)? {
@@ -102,6 +141,7 @@ struct ProjectHeader: View {
                 Button { model.runAll(project) } label: { Label("Chạy toàn bộ", systemImage: "play.fill") }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(model.isBusy(project.id))  // a short command is saving this project
                     .help("Chạy các bước chưa xong hoặc cần chạy lại; bước còn hợp lệ được bỏ qua")
             }
             Button { showSettings = true } label: { Label("Cài đặt", systemImage: "slider.horizontal.3") }
@@ -173,7 +213,7 @@ struct StageList: View {
                     if index > 0 { Divider().padding(.leading, 56) }
                     StageRow(number: index + 1, stage: stage, status: status(of: stage),
                              state: project.file.state(of: stage), run: run,
-                             isBusy: model.queue.isBusy(project: project.id),
+                             isBusy: model.isBusy(project.id),
                              actions: StageActions(runFrom: { model.runFrom(stage, project) },
                                                    rerun: { model.rerun(stage, project) }))
                 }
