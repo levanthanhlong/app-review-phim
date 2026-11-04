@@ -40,7 +40,9 @@
 | Claude Code CLI | Đã cài và đã đăng nhập (`claude -p "hi"` chạy được) |
 | Xcode | 16+, Swift 5.10+/6, SwiftUI |
 
-Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 Turbo, ONNX, model ~1GB trong HF cache trên SSD), `onnxruntime==1.22.1` (ghim: bản ≥1.23 từ chối file weights dạng symlink của HF cache), `edge-tts`, `pyyaml`, `pydantic`, `ollama`, `pillow`, `numpy`.
+Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 Turbo, ONNX, model ~1GB trong HF cache trên SSD), `onnxruntime==1.22.1` (ghim: bản ≥1.23 từ chối file weights dạng symlink của HF cache), `edge-tts`, `pyyaml`, `pydantic`, `ollama`, `pillow`, `numpy`, `pyobjc-framework-Vision` (đọc chữ trong hình bằng macOS Vision, cho stage `inspect`).
+
+Cài trên máy mới: `./setup.sh` (công cụ, worker, model, app; mọi cache và model đặt trên ExternalSSD). Tạo file cài app: `./make_dmg.sh` (mục 7.1).
 
 ### Vị trí lưu trữ (ExternalSSD)
 
@@ -48,8 +50,9 @@ Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 T
 |---|---|---|
 | Model Ollama (~6GB) | `/Volumes/ExternalSSD/ollama-models` | biến môi trường `OLLAMA_MODELS` (đặt trước khi chạy `ollama serve`) |
 | Model Whisper/HuggingFace (~1.6GB) | `/Volumes/ExternalSSD/hf-cache` | biến môi trường `HF_HOME` (worker tự set khi chạy) |
-| Thư mục các dự án (~4–5GB/phim) | `/Volumes/ExternalSSD/myapps/appMReviewphim/output/` | biến môi trường `RECAP_PROJECTS_ROOT` (mặc định `output/` trong repo) |
-| Code + venv worker | `/Volumes/ExternalSSD/myapps/appMReviewphim/` | — |
+| Thư mục các dự án (~4–5GB/phim) | `/Volumes/ExternalSSD/myapps/app-review-phim/output/` | biến môi trường `RECAP_PROJECTS_ROOT` (mặc định `output/` trong repo) |
+| Code + venv worker | `/Volumes/ExternalSSD/myapps/app-review-phim/` | — |
+| Cache uv/pip/Homebrew, file tạm | `/Volumes/ExternalSSD/{uv-cache,pip-cache,homebrew-cache,cache,tmp}` | `setup.sh` đặt `UV_CACHE_DIR`, `PIP_CACHE_DIR`, `HOMEBREW_CACHE`, `XDG_CACHE_HOME`, `TMPDIR` |
 
 - `recap doctor` phải kiểm tra ExternalSSD đã được gắn (mount) và còn ≥ 10GB trống trước khi chạy pipeline; nếu chưa gắn thì báo lỗi `storage_unavailable`.
 - File tạm của ffmpeg cũng ghi vào thư mục `work/` của dự án (không dùng `/tmp` trên ổ trong).
@@ -66,8 +69,9 @@ Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 T
                │ chạy: worker/.venv/bin/python -m recap <stage> │ stdout: JSON Lines
                ▼                                               │ (progress/log/result)
 ┌──────────────────────────── worker (Python CLI "recap") ───────────────────┐
-│ ingest → transcribe → scenes → describe → script → tts → assemble → export │
-│   ffmpeg   mlx-whisper  PySceneDetect  Ollama VL  claude -p  VieNeu   ffmpeg│
+│ ingest → transcribe → scenes → inspect → describe → script → tts → music   │
+│ ffmpeg   mlx-whisper  PySceneDetect  Vision OCR  Ollama VL  claude -p VieNeu│
+│                                  → assemble → export   (ffmpeg)             │
 └────────────────────────────────────────────────────────────────────────────┘
                      đọc/ghi:  <Project>.recap/  (thư mục dự án)
 ```
@@ -94,9 +98,11 @@ RecapStudio/
 │   │   │   ├── ingest.py
 │   │   │   ├── transcribe.py
 │   │   │   ├── scenes.py
+│   │   │   ├── inspect.py    # OCR + luật: watermark, quảng cáo, credit, viền đen
 │   │   │   ├── describe.py
 │   │   │   ├── script.py
 │   │   │   ├── tts.py
+│   │   │   ├── music.py      # nhạc nền AI (chỉ khi music_source = "ai")
 │   │   │   ├── assemble.py
 │   │   │   └── export.py
 │   │   ├── llm/              # lớp provider có thể thay thế
@@ -104,17 +110,30 @@ RecapStudio/
 │   │   │   ├── claude_cli.py # mặc định
 │   │   │   ├── claude_api.py # để sau
 │   │   │   └── ollama.py     # dự phòng
+│   │   ├── inspect_rules.py  # luật thuần của inspect (watermark, cờ, đoạn bỏ)
+│   │   ├── ad_blurs.py       # quảng cáo chèn đè → vùng làm mờ có thời gian
+│   │   ├── ocr.py            # macOS Vision
+│   │   ├── cleanup.py        # filter ffmpeg: làm mờ watermark/quảng cáo, cắt viền đen
+│   │   ├── beat_marks.py     # đánh dấu beat của người dùng + beat inspect tự bỏ
+│   │   ├── branding.py       # banner kênh, logo, brand.json
+│   │   ├── script_edit.py    # lệnh cho Script Editor / Scene Browser
 │   │   └── prompts/
 │   │       ├── describe_scene.md
-│   │       └── write_script.md
+│   │       ├── write_script.md
+│   │       ├── narration_guide.md  # giọng văn kênh, gửi kèm prompt viết kịch bản
+│   │       ├── rewrite_line.md
+│   │       └── plan_music.md
 │   └── tests/
-└── samples/                  # đặt 1 clip ngắn (2–5 phút) để test
+├── samples/                  # đặt 1 clip ngắn (2–5 phút) để test
+├── img/                      # ảnh kênh: "Banner dưới video…", "Ảnh đại diện…", brand.json
+├── setup.sh                  # cài đặt máy mới
+└── make_dmg.sh               # build Release + đóng gói dist/RecapStudio-<version>.dmg
 ```
 
 ### Thư mục dự án (mỗi phim một thư mục)
 
 ```
-/Volumes/ExternalSSD/myapps/appMReviewphim/output/<TenPhim>.recap/
+/Volumes/ExternalSSD/myapps/app-review-phim/output/<TenPhim>.recap/
 ├── project.json              # metadata + settings + trạng thái từng stage
 ├── source.mp4 -> (symlink tới file phim gốc)
 ├── work/
@@ -122,16 +141,23 @@ RecapStudio/
 │   ├── audio_16k.wav
 │   ├── transcript.json
 │   ├── scenes.json
-│   ├── keyframes/scene_0001.jpg ...
+│   ├── keyframes/B0001.jpg ...
+│   ├── inspect.json          # kết quả stage inspect (mục 5.4)
+│   ├── inspect/ocr.json      # cache chữ đọc được, 1 khung/giây (ghi dần, chạy tiếp được)
+│   ├── beat_marks.json       # đánh dấu của người dùng: {beat_id: star|skip|keep}
 │   ├── scenes_described.json
 │   ├── digest/part_01.txt ...  # danh sách cảnh rút gọn, gửi cho LLM
 │   ├── script_parts/part_01.yaml ...
-│   ├── tts/line_0001.wav ...
+│   ├── script_backups/       # script.yaml cũ (kể cả bản sửa tay) trước khi bị viết lại
+│   ├── tts/<engine>_<hash>.wav ... + manifest.json
+│   ├── music/                # plan.json + các phương án nhạc AI
+│   ├── brand/<profile>.png   # khung banner + logo đã vẽ theo kích thước render
+│   ├── render/<profile>/     # clip đã render của từng dòng timeline (cache)
 │   └── timeline.json
 ├── script.yaml               # kịch bản hoàn chỉnh (người dùng sửa được)
 ├── output/
 │   ├── recap_preview.mp4     # 854x480, render nhanh
-│   ├── recap.mp4             # bản cuối, tối đa 1920x1080 (không phóng to)
+│   ├── recap.mp4             # bản cuối, luôn 1920x1080
 │   ├── recap_subbed.mp4
 │   └── recap.srt
 └── logs/<stage>.log
@@ -143,6 +169,12 @@ RecapStudio/
 
 Mỗi stage: `python -m recap <stage> --project <path> [--force]`.
 `python -m recap run --project <path> --from <stage> --to <stage>` để chạy liên tiếp.
+
+Lệnh cho app, chạy trên dự án (ngoài hàng đợi job nặng; mọi thay đổi đánh dấu `stale` như `set`):
+- `set --project P key=value …` (mục 7.1).
+- `script-show` / `script-save --file EDIT.json` / `script-rewrite --line L0001 [--hint H]`: Script Editor (mục 7.2).
+- `beat-mark --beat B0001 --mark star|skip|keep|none`: Scene Browser. Kết quả gồm `marks` và `auto_skips` (beat do `inspect` tự bỏ, kèm lý do).
+- `music-choose --cue M01 --option N` / `music-edit --cue M01 [--prompt P] [--alt-prompt P] [--reroll]`: nhạc AI (mục 4.7).
 
 Lệnh phụ cho app (không cần dự án):
 - `python -m recap voices` → `result` với `{voices: [{engine, id, description, gender, region, featured}], default: {engine, voice}}`. Đọc danh mục có sẵn trong package nên trả về ngay, không nạp model.
@@ -168,9 +200,28 @@ Lệnh phụ cho app (không cần dự án):
 - Mỗi beat xuất 1 keyframe (frame ở giữa beat, rộng 512px) vào `keyframes/`.
 - Output `scenes.json`: `[{id, start, end, shots: [[s,e],...], keyframe, dialogue: "thoại nằm trong khoảng này"}]`.
 
+### 4.3b `inspect` (kiểm tra nguồn)
+
+Tìm những thứ trong phim gốc không được lọt vào video tóm tắt. Stage này **không bắt buộc**: `describe` chỉ cần `scenes` xong (dự án tạo trước khi có stage này vẫn chạy được). Thiếu `inspect.json` thì không bỏ cảnh và không làm mờ gì.
+
+1. Lấy 1 khung/giây từ proxy, đọc chữ bằng macOS Vision (mức accurate, tiếng Việt + Anh, khoảng 30ms/khung). Kết quả cache trong `work/inspect/ocr.json`, ghi dần mỗi 100 khung, nên huỷ giữa chừng thì chạy tiếp được; đổi beat thì chỉ áp lại luật. Khung Vision không đọc được thì coi như không có chữ (cảnh báo, không dừng pipeline). Khung ảnh tạm bị xoá sau khi xong.
+2. **Bản đồ điểm ảnh tĩnh** từ khoảng 150 khung thu nhỏ 240×135: điểm có độ sáng lệch ≤ 12 so với trung vị ở ≥ 70% số khung và sáng hơn 24.
+3. **Luật** (`inspect_rules.py`, chỉ tính chữ có độ tin cậy ≥ 0.5):
+   - Chữ ở cùng chỗ trong ≥ 30% số khung là lớp phủ: nội dung giống nhau là **watermark** (vùng được nới ra theo cụm điểm tĩnh quanh chữ để phủ cả logo), nội dung thay đổi là **phụ đề gắn cứng** (để nguyên). Logo không chữ: cụm điểm tĩnh liền nhau lớn nhất ở mỗi góc (vùng 30%).
+   - Chữ ngoài lớp phủ có từ khoá quảng cáo (tài trợ, nhà cái, hotline, tên miền…), credit (đạo diễn, diễn viên, tập N…), hậu trường, tuyên bố miễn trừ, hoặc thẻ tiêu đề ở 90 giây đầu / 180 giây cuối thì gắn cờ. **Cờ chỉ được tính khi có ≥ 2 cờ trong vòng 3 giây** (thẻ thật hiện vài giây; biển hiệu thoáng qua hay chữ đọc nhầm thì không).
+   - Quảng cáo **chèn đè lên phim** (chữ thấp hơn 8% khung và không nằm giữa khung) thì **làm mờ đúng vùng đó trong lúc nó hiện**, giữ cảnh (`ad_blurs`). Quảng cáo dạng thẻ (chữ to hoặc ở giữa) thì bỏ cảnh.
+   - Cờ trong 15% đầu phim thì bỏ từ đầu tới đó; cờ trong 25% cuối thì bỏ từ đó tới hết (thẻ mở đầu, credit, hậu trường). Beat chạm đoạn bỏ thì bị bỏ, kèm lý do.
+4. **Viền đen**: `cropdetect` trên proxy (1 mẫu/2 giây). Chỉ cắt khi một kết quả chiếm đa số mẫu, giữ ≥ 50% khung, viền hai bên cân nhau (lệch ≤ 5%), và bỏ đi ≥ 5% khung.
+5. **Chất lượng nguồn**: cao ≥ 1080 là `ok`, ≥ 720 là `acceptable`, thấp hơn là `low` (cảnh báo nên tìm bản tốt hơn).
+
+Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùng cảnh này" trong Scene Browser); mọi mark của người dùng đều thắng cờ tự động. Đổi luật thì tăng `RULES_VERSION` để stage chạy lại (OCR vẫn dùng cache).
+
+Đo trên Cơm Nguội tập 136 (26 phút, 1080p): 52 giây (9 giây khi dùng cache OCR); tìm đúng watermark kênh gốc, bỏ 0–10s và 1354s–hết (24/169 beat).
+
 ### 4.4 `describe`
 
-- Ollama, model `qwen2.5vl:7b` (cấu hình được). Với mỗi beat, gửi keyframe + thoại, nhận mô tả ngắn tiếng Việt (≤ 30 từ): ai, đang làm gì, ở đâu, cảm xúc.
+- Ollama, model `qwen2.5vl:7b` (cấu hình được). Với mỗi beat, gửi keyframe + thoại, nhận mô tả ngắn tiếng Việt (≤ 30 từ): ai (tên hoặc vai trò, không tả quần áo hay tóc), đang làm gì, ở đâu, cảm xúc.
+- Đây là stage chậm nhất (Cơm Nguội 26 phút: khoảng 27 phút) và tốn RAM nhất (llama-server khoảng 5.6GB).
 - Prompt nằm trong `prompts/describe_scene.md`.
 - **Cache theo beat id**: chạy lại chỉ xử lý beat chưa có mô tả. In progress theo từng beat.
 - Output `scenes_described.json` = `scenes.json` thêm trường `desc`.
@@ -190,7 +241,10 @@ Lệnh phụ cho app (không cần dự án):
    - Ước tính thời lượng = Σ(số từ / words_per_sec + 0.25s đệm mỗi câu kể) + Σ độ dài dòng original. Đổi giọng thì fingerprint của `script` đổi theo. `script.yaml` lưu `words_per_sec` đã dùng.
    - Không cấp tool cho Claude (chỉ nhận text). Lấy trường `result` trong JSON.
 3. **Validate** YAML theo schema (mục 5.2): beat id phải tồn tại; mốc thời gian nằm trong beat; thời lượng ước tính gần mục tiêu ±15%. Nếu sai thì gọi lại **tối đa 2 lần**, kèm thông báo lỗi cụ thể.
-4. Gộp các phần thành `script.yaml`.
+   - Mỗi clip dưới lời kể dài 2–8 giây, mỗi đoạn `original` 5–10 giây (validate chặn clip > 8s và original > 10s). Lời kể nói nhân quả và chuyển ý, không tả lại hình hay nhắc lại thoại; kết bằng nhận xét của kênh và lời mời bình luận (`prompts/narration_guide.md`).
+   - **Đánh dấu beat**: beat bị bỏ (mark `skip`, hoặc `inspect` tự bỏ mà người dùng không mark) không có trong digest nên Claude không dùng được. Beat ⭐ được gắn cờ `⭐ QUAN TRỌNG` trong digest và prompt thêm quy tắc phải dùng. Mọi beat đều bị bỏ thì báo lỗi, nói rõ bao nhiêu beat do `inspect` bỏ. Fingerprint có thêm chữ ký của các mark (chỉ khi có mark).
+   - Thời lượng mục tiêu = `target_ratio` × thời lượng **cả phim** (kể cả đoạn bị bỏ).
+4. Gộp các phần thành `script.yaml`. Nếu `script.yaml` cũ khác bản mới thì lưu bản cũ vào `work/script_backups/` (giữ lại phần sửa tay).
 5. Lỗi hết hạn mức hoặc lỗi CLI: dừng stage với `error.code = "llm_quota"` hoặc `"llm_failed"`, giữ nguyên các phần đã xong để chạy tiếp sau.
 
 > Lớp `llm/base.py` định nghĩa `generate(prompt, input_text) -> str`. Mặc định dùng `ClaudeCLIProvider`. Chuyển provider trong settings mà không phải sửa code stage.
@@ -206,7 +260,13 @@ Lệnh phụ cho app (không cần dự án):
 - Tốc độ đọc khác nhau theo giọng, từ 2.98 từ/giây (Kim Thanh) đến 4.78 từ/giây (Thùy Dung). Số đo lưu trong `recap/data/voice_rates.json`, tạo bằng `tools/measure_voice_rates.py` (8 câu chuẩn cho mỗi giọng; đo lại khi thêm giọng hoặc nâng cấp vieneu). `recap voices` trả kèm `words_per_sec`.
 - Nếu `script.yaml` được viết cho tốc độ lệch hơn 15% so với giọng hiện tại thì log `warning` gợi ý chạy lại `script`.
 
-### 4.7 `assemble` (căn khớp + render)
+### 4.7 `music` (nhạc nền)
+
+- `music_source: library` (mặc định): dùng `music_file` (file trong thư mục `music/`, mỗi thư mục con một thể loại) hoặc không có nhạc. Stage này bỏ qua.
+- `music_source: ai`: (1) Claude chia timeline thành các đoạn cùng cảm xúc và viết prompt nhạc tiếng Anh cho mỗi đoạn (cấm nhắc tên phim, nhân vật, nghệ sĩ; sai thì gọi lại). Kế hoạch giữ nguyên khi đầu vào không đổi, nên lựa chọn và chỉnh sửa của người dùng được giữ. (2) Mỗi đoạn tạo 3 phương án bằng Stable Audio 3 (MLX, `music_model`), dự phòng ACE-Step 1.5, có cache. (3) Ghi `output/music_provenance.json` (prompt, seed, model, giấy phép, hash file).
+- Khi ghép: nhạc ở `music_volume` (0.10) dưới lời kể, `music_bed_volume` (0.25) khi không ai nói.
+
+### 4.8 `assemble` (căn khớp + render)
 
 **Quy tắc căn khớp** cho mỗi mục trong script, tạo `timeline.json`:
 
@@ -215,14 +275,17 @@ Lệnh phụ cho app (không cần dự án):
 | `narrate` + `clips` | Độ dài đoạn = độ dài TTS + `pad` (0.25s). Lấy các clip theo thứ tự. **Clip dư** thì cắt bớt đuôi. **Clip thiếu** thì: (1) kéo dài clip cuối trong phạm vi beat của nó, (2) nối tiếp sang các shot kế tiếp trong cùng beat, (3) nếu vẫn thiếu thì làm chậm hình tối đa 0.85x, (4) vẫn thiếu thì đánh dấu `fit: "short"` để báo trên UI |
 | `original` | Giữ nguyên hình và tiếng gốc, không có lời kể |
 
-- **Âm thanh**: khi đang có lời kể, giảm tiếng phim xuống `duck_volume` (mặc định 0.15) bằng sidechain hoặc volume theo khoảng thời gian, có fade 0.2s ở hai đầu. Đoạn `original` để âm lượng 1.0. Chuẩn hóa toàn bộ về −16 LUFS.
+- Không đoạn phim liền nào dài quá 8 giây khi kéo dài clip để khớp lời kể (`fit.MAX_SEGMENT_SEC`).
+- **Âm thanh**: khi đang có lời kể, tiếng phim ở `duck_volume` (mặc định **0 = tắt**), có fade 0.2s ở hai đầu. Đoạn `original` để âm lượng 1.0. Chuẩn hóa toàn bộ về **−14 LUFS** (mức YouTube/Facebook phát).
+- **Làm sạch nguồn** (từ `inspect.json`, module `cleanup`): watermark làm mờ suốt video, quảng cáo chèn đè làm mờ trong khoảng thời gian của nó, viền đen bị cắt. Vùng tính theo tỉ lệ khung nên dùng chung cho proxy và file gốc; filter đặt ngay sau input đã seek nên thời gian tính từ đầu mỗi đoạn. Chỉ báo cáo `inspect` thay đổi phần làm sạch thì mới render lại (đổi danh sách beat bỏ thì không).
+- **Banner kênh** (`brand_banner`, `brand_logo`): film co vào khung, dải banner dưới, dải phim mỏng trên, logo tròn ở góc. Tùy chỉnh trong `brand.json` đặt cạnh ảnh banner: `top_ratio` (0–0.02, mặc định 0.02), `bottom_ratio` (0.03–0.08, mặc định 0.08), `banner_align` (left/center/right), `overlay` (banner đè lên mép phim) + `overlay_opacity` (0.6), `video_fit` (`fill` = cắt phần thừa, không viền đen; `fit` = giữ cả hình), `logo_corner`, `logo_ratio` (0.07).
 - **Render**: `assemble` tạo `recap_preview.mp4` (480p, nhanh, từ proxy). Bản cuối do stage `export` render từ file gốc. Mỗi dòng timeline được render thành một clip riêng trong `work/render/<profile>/` và cache theo hash, nên sửa một câu chỉ render lại câu đó (module `timeline_render`, dùng chung cho cả hai).
 - Chuyển cảnh: cắt thẳng; có tùy chọn crossfade 0.2s.
 
-### 4.8 `export`
+### 4.9 `export`
 
 - `recap.srt`: lấy từ timeline. Mỗi câu kể hiển thị trong đúng khoảng giọng đọc (bắt đầu từ `out_start + 0.1s`, dài bằng thời lượng TTS). Câu dài được tách thành nhiều đoạn, mỗi đoạn tối đa 2 dòng × 42 ký tự, ưu tiên ngắt sau dấu câu; thời gian chia theo số ký tự. Khoảng trống giữa hai đoạn dưới 0.5s thì được lấp để phụ đề không chớp tắt.
-- `recap.mp4`: render lại timeline từ **file gốc** (đúng track âm thanh đã chọn), khung 16:9, cao tối đa 1080p nhưng **không phóng to quá độ phân giải gốc** (phim 480p thì xuất 480p). x264 crf 20, preset medium, âm thanh −16 LUFS như preview.
+- `recap.mp4`: render lại timeline từ **file gốc** (đúng track âm thanh đã chọn), **luôn 1920×1080** (nguồn thấp hơn thì phóng to bằng lanczos và làm nét nhẹ `unsharp`), x264 bitrate trung bình 10 Mbps, tối đa 12 Mbps, âm thanh −14 LUFS như preview. Không ép bitrate tối thiểu: hình đơn giản (hoạt hình) tự dùng ít hơn mà vẫn nét (đo được: phim người đóng 8.8 Mbps, hoạt hình 6.6 Mbps).
 - `recap_subbed.mp4`: `recap.mp4` có phụ đề gắn cứng. Bản ffmpeg của Homebrew không có libass/freetype (không có filter `subtitles` hay `drawtext`), nên mỗi đoạn phụ đề được vẽ bằng Pillow thành một ảnh PNG trong suốt (chữ trắng, viền đen, font `settings.subtitle_font`, mặc định Arial; tên font hoặc đường dẫn file). Một file `ffconcat` định thời gian cho các ảnh, rồi dùng filter `overlay` chồng lên video. Font không tồn tại thì báo `font_missing` trước khi render.
 - Đã kiểm tra trên phim mẫu bằng Whisper word timestamps: từ đầu và từ cuối của mỗi đoạn lệch so với phụ đề trung vị dưới 0.25s. Chỗ lệch lớn nhất (khoảng 1.3s) nằm ở ranh giới giữa các đoạn được tách từ cùng một câu dài.
 - Tùy chọn khung dọc 9:16 (crop giữa, hoặc blur nền) cho TikTok. Để mức ưu tiên thấp (chưa làm).
@@ -251,21 +314,32 @@ Lệnh phụ cho app (không cần dự án):
     "whisper_model": "mlx-community/whisper-large-v3-turbo",
     "llm_provider": "claude_cli",
     "claude_model": "sonnet",
-    "duck_volume": 0.15,
+    "whisper_task": "transcribe",
+    "scene_detector": "adaptive",
+    "scene_threshold": null,
+    "duck_volume": 0.0,
+    "music_source": "library",
+    "music_file": null,
+    "music_volume": 0.10,
+    "music_bed_volume": 0.25,
+    "music_model": "medium",
+    "brand_banner": null,
+    "brand_logo": null,
     "subtitle_font": "Arial",
     "min_beat_sec": 4,
     "max_beat_sec": 20,
-    "part_size_min": 30
+    "part_size_min": 30,
+    "audio_track": null
   },
   "stages": {
-    "ingest":     {"status": "done", "started_at": "...", "finished_at": "...", "error": null},
+    "ingest":     {"status": "done", "started_at": "...", "finished_at": "...", "elapsed_sec": 56, "fingerprint": "...", "error": null},
     "transcribe": {"status": "running", "progress": 0.42},
     "scenes":     {"status": "pending"}
   }
 }
 ```
 
-`status`: `pending | running | done | failed | stale`. Khi người dùng đổi một setting, đánh dấu `stale` cho các stage phụ thuộc vào setting đó, ví dụ đổi giọng thì `tts`, `assemble`, `export` thành `stale`.
+Thứ tự stage: `ingest, transcribe, scenes, inspect, describe, script, tts, music, assemble, export`. `status`: `pending | running | done | failed | stale`. Khi người dùng đổi một setting, đánh dấu `stale` cho các stage phụ thuộc vào setting đó, ví dụ đổi giọng thì `tts`, `assemble`, `export` thành `stale`.
 
 ### 5.2 `script.yaml`
 
@@ -290,6 +364,24 @@ items:
 ### 5.3 `timeline.json` (do `assemble` tạo ra, UI chỉ đọc)
 
 `[{id, out_start, out_end, tts_file, tts_dur, segments:[{src_start, src_end, speed}], fit: "ok|short|trimmed"}]`
+
+---
+
+### 5.4 `inspect.json` (do `inspect` tạo ra)
+
+```json
+{
+  "source": {"width": 1920, "height": 1080, "quality": "ok"},
+  "watermarks": [{"x": 0.04, "y": 0.80, "w": 0.33, "h": 0.20, "text": "youtube.com/kenh"}],
+  "subtitles": [{"x": 0.1, "y": 0.85, "w": 0.8, "h": 0.1, "text": "mẫu phụ đề"}],
+  "letterbox": {"x": 0.0, "y": 0.125, "w": 1.0, "h": 0.75},
+  "ad_blurs": [{"start": 299.5, "end": 305.5, "x": 0.73, "y": 0.03, "w": 0.24, "h": 0.08, "text": "w88.bet"}],
+  "skip_ranges": [{"start": 0.0, "end": 10.5, "reason": "credit: đạo diễn: …"}],
+  "skip_beats": {"B0001": "credit: đạo diễn: …"}
+}
+```
+
+Mọi vùng tính theo tỉ lệ khung (0–1, gốc trên trái). `letterbox` là phần giữ lại (null = không cắt).
 
 ---
 
@@ -318,14 +410,15 @@ Mỗi dòng stdout là một JSON object:
 - SwiftUI, macOS 14+, kiến trúc MVVM, Swift Concurrency (`async/await`, `AsyncStream` để đọc JSON Lines).
 - **Tắt App Sandbox.** Hardened Runtime bật cũng được (app không phân phối).
 - `PipelineRunner` (actor): chạy `Process`, đọc stdout từng dòng, decode thành enum `WorkerEvent`, cập nhật `@Observable ProjectViewModel`. Mỗi lúc chỉ 1 job nặng; các dự án khác vào hàng đợi.
-- Lưu trữ: đọc/ghi trực tiếp các file trong thư mục dự án. Danh sách dự án là thư mục `appMReviewphim/output/` (cấu hình được), theo dõi bằng `FileManager` hoặc `DispatchSource`.
+- Lưu trữ: đọc/ghi trực tiếp các file trong thư mục dự án. Danh sách dự án là thư mục `app-review-phim/output/` (cấu hình được), theo dõi bằng `FileManager` hoặc `DispatchSource`.
 - Settings toàn cục (`@AppStorage`): đường dẫn `python` (venv của worker), `ffmpeg`, `claude`, `ollama`; thư mục dự án mặc định; các model mặc định. Có nút **"Kiểm tra môi trường"** chạy `recap doctor` và hiển thị ✅/❌ cho từng công cụ.
 
 - **App chỉ đọc `project.json`.** Mọi thay đổi settings đi qua `python -m recap set --project P key=value …`. Worker kiểm tra giá trị (pydantic, giọng có tồn tại không, `tts_rate` có hợp lệ không), lưu, và đánh dấu `stale` cho stage có fingerprint thay đổi cùng mọi stage `done` phía sau. Kết quả trả về `{settings, stale}`; lỗi trả về `settings_invalid`. Stage `stale` vẫn đủ điều kiện để chạy các stage sau nó (output còn, chỉ cũ). Fingerprint của `script` chỉ đổi khi tốc độ giọng lệch quá 15% so với `words_per_sec` ghi trong `script.yaml`.
 - **Unicode:** Foundation `Process` truyền tham số ở dạng NFD. Worker chuẩn hóa mọi tham số dòng lệnh về NFC trước khi xử lý (tên giọng, tên phim).
 - **Mã nguồn:** `app/RecapKit` (Swift package: model `project.json`, giải mã `WorkerEvent`, `WorkerClient` chạy `Process`, đọc pipe bằng `readabilityHandler`, hủy bằng SIGTERM, `JobQueue` 1 job nặng một lúc, `ProjectRunState`, danh sách dự án, cache nghe thử giọng). `app/RecapStudio` (SwiftUI). `app/project.yml` dùng cho XcodeGen.
-  - Test: `cd app/RecapKit && swift test`. Thêm `RECAP_INTEGRATION=1` để chạy cả các test gọi worker thật.
-  - Build: `cd app && xcodegen generate && xcodebuild -project RecapStudio.xcodeproj -scheme RecapStudio -derivedDataPath build build`.
+  - Test: `/usr/bin/xcrun swift test --package-path app/RecapKit` (gọi qua `xcrun` để dùng toolchain của Xcode, không bị swiftly che). Thêm `RECAP_INTEGRATION=1` để chạy cả các test gọi worker thật.
+  - Build: `cd app && xcodegen generate && xcodebuild -project RecapStudio.xcodeproj -scheme RecapStudio -destination "platform=macOS,arch=arm64" -derivedDataPath build build`.
+  - Đóng gói: `./make_dmg.sh` build bản Release và tạo `dist/RecapStudio-<MARKETING_VERSION>.dmg` (app + lối tắt Applications). Mặc định ký ad-hoc (đủ cho máy cá nhân); `--choose-cert` chọn chứng chỉ trong Keychain (bỏ chứng chỉ bị thu hồi), `--cert <SHA-1|tên>` ký thẳng. Notarize (`NOTARY_PROFILE`) chỉ với chứng chỉ Developer ID. DMG chỉ chứa app: máy cài vẫn cần repo và `./setup.sh`, đường dẫn worker đặt trong Cài đặt.
   - Các lệnh ngắn (`new`, `set`, `voices`, `voice-preview`, `doctor`) chạy ngoài hàng đợi. Đang có job của một dự án thì nút Cài đặt của dự án đó bị khóa, vì runner sẽ ghi đè `project.json` khi stage kết thúc.
 
 ### 7.2 Màn hình
@@ -345,6 +438,8 @@ Mỗi dòng stdout là một JSON object:
    - Lưới keyframe của các beat: mốc thời gian, mô tả, thoại.
    - Bấm vào một beat để phát đoạn đó (AVPlayer, seek tới `start`).
    - Đánh dấu beat ⭐ "quan trọng" (gửi kèm gợi ý cho Claude) hoặc 🚫 "bỏ qua".
+   - Beat do `inspect` tự bỏ hiện mờ với nhãn 🤖🚫 và lý do ("Tự động bỏ: credit: …"); nút **"Vẫn dùng cảnh này"** đặt mark `keep`. Bộ lọc "Bỏ qua" gồm cả beat tự bỏ. Hộp chọn clip trong Script Editor cũng ẩn các beat bị bỏ.
+   - Đổi mark thì `script` thành `stale`; chạy lại sẽ viết kịch bản mới (bản cũ vào `work/script_backups/`).
 
 4. **Script Editor**
    - Bảng các dòng kịch bản: id, loại, text (sửa trực tiếp), clip (chọn lại từ Scene Browser), thời lượng TTS, trạng thái `fit` (✅ / ⚠️ short / ✂️ trimmed).
@@ -365,6 +460,8 @@ Mỗi dòng stdout là một JSON object:
 ---
 
 ## 8. Prompt mẫu
+
+> Bản đang dùng nằm trong `worker/recap/prompts/` và đã khác các mẫu dưới đây (thêm `narration_guide.md`: không tả quần áo, kể nhân quả, có câu chuyển ý, clip 2–8s, original 5–10s, kết bằng nhận xét kênh + mời bình luận). Các mẫu dưới đây chỉ để tham khảo ý ban đầu.
 
 ### 8.1 `prompts/describe_scene.md`
 
@@ -417,7 +514,12 @@ Schema:
 | edge-tts lỗi mạng / `NoAudioReceived` | Retry 3 lần, sau đó chuyển sang `say -v Linh` và báo trên UI (chỉ khi `tts_engine: edge`) |
 | VieNeu lỗi / chưa tải model | `tts_failed` (retryable). Lần chạy đầu tự tải model khoảng 1GB về HF cache trên SSD |
 | Phim có nhiều track audio | Dùng track mặc định, cho chọn trong settings |
+| OCR (Vision) không đọc được khung / thiếu pyobjc | Khung đó coi như không có chữ, log `warning`; `inspect` vẫn xong (vẫn tìm logo tĩnh và viền đen) |
+| `cropdetect` lỗi / không có ffmpeg | Bỏ qua phần viền đen, log `warning` |
+| Mọi beat đều bị bỏ | `script` báo `input_missing`, nói số beat do `inspect` bỏ và chỉ tới nút "Vẫn dùng cảnh này" |
 | RAM | Không chạy Whisper và Ollama VL cùng lúc. Sau stage `describe` thì gọi unload model Ollama (`keep_alive: 0`) |
+
+Đo thật trên Cơm Nguội tập 136 (26 phút, 1080p, máy 16GB): ingest 56s, transcribe 2:55, scenes 23s (169 beat), inspect 52s, describe 26:50, script 2–8 phút, tts 1:08, assemble 21s, export 3:52–4:27.
 
 Ước tính trên M1 Max cho phim 2 tiếng: transcribe 10–20 phút, scenes 5–10 phút, describe 30–60 phút, script 5–15 phút, tts 2–5 phút, assemble preview 5 phút, render 1080p 10–20 phút.
 
@@ -438,6 +540,8 @@ Schema:
 | **M9** | Preview & Export: player + highlight dòng theo thời gian phát | Bấm vào dòng thì nhảy đúng đoạn |
 | **M10** | Test với 1 phim đầy đủ ~2 tiếng, tối ưu thời gian và RAM | Hoàn thành không lỗi. Ghi lại thời gian từng stage trong `project.json` |
 
+| **M11** | Cải tiến theo góp ý chuyên gia, làm theo thứ tự đã duyệt: (1) sửa nhanh: clip ≤ 8s, original ≤ 10s, tắt tiếng phim dưới lời kể, −14 LUFS, luôn 1080p 10 Mbps + lanczos/sharpen, banner mỏng tùy chỉnh bằng `brand.json`, prompt không tả quần áo; (4) stage `inspect`: OCR, watermark, quảng cáo, credit, viền đen; (2) QA tự động có ngưỡng chặn; (3) hồ sơ phim + kịch bản kể chuyện trước; (5) sửa clip và giọng đọc (150–170 từ/phút, ngắt nghỉ, từ điển phát âm). Sau đó: gom mặt nhân vật, kiểm tra sự thật bằng VL, Real-ESRGAN, khung 9:16 | Mỗi mục chạy thử trên video mẫu và báo cáo số đo. **Đã xong (1) và (4).** Còn lại (2), (3), (5): hiện giọng đọc khoảng 273 từ/phút |
+
 Yêu cầu chung: có unit test cho phần căn khớp (`assemble`) và validate script; dùng type hint đầy đủ; code Swift tách View, ViewModel và Service.
 
 ---
@@ -453,4 +557,4 @@ Yêu cầu chung: có unit test cho phần căn khớp (`assemble`) và validate
 ## 12. Ghi chú pháp lý và sử dụng
 
 - Chỉ dùng file phim có nguồn hợp pháp. Video tóm tắt có dùng cảnh phim vẫn có thể bị nền tảng nhận diện bản quyền.
-- Bước viết kịch bản dùng hạn mức gói Claude Pro cá nhân thông qua Claude Code CLI. Nếu sau này phân phối app cho người khác, phải chuyển sang `claude_api` provider.
+- Các bước dùng Claude (viết kịch bản, chia nhạc AI, viết lại 1 câu) dùng hạn mức gói Claude cá nhân thông qua Claude Code CLI (không đặt `ANTHROPIC_API_KEY` nên không tính tiền API). Một lần viết kịch bản phim 26 phút khoảng 25–35 nghìn token. Nếu sau này phân phối app cho người khác, phải chuyển sang `claude_api` provider.
