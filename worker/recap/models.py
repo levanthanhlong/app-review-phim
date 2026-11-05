@@ -14,6 +14,7 @@ STAGE_NAMES: tuple[str, ...] = (
     "transcribe",
     "scenes",
     "inspect",
+    "characters",
     "describe",
     "script",
     "tts",
@@ -60,6 +61,9 @@ class Settings(Frozen):
     target_ratio: float = 0.2
     language: str = "auto"
     narration_style: str = "kich_tinh"
+    # The channel the narrator speaks for, and what the narrator calls themself (skill recap-script-vi).
+    channel_name: str = "Mắm Review Phim"
+    narrator: str = "Mắm"
     # "vieneu" = offline VieNeu-TTS (voice = preset name); "edge" = edge-tts (voice = vi-VN-...Neural).
     # `python -m recap voices` lists valid values.
     tts_engine: Literal["vieneu", "edge"] = "vieneu"

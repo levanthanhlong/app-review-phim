@@ -115,6 +115,12 @@ final class AppModel {
         enqueue(project, [stage.rawValue, "--project", project.id.path, "--force"], title: "Chạy lại \(stage.label)")
     }
 
+    /// Claude rewrites the whole script following the user's notes (minutes: runs in the queue).
+    func reviseScript(_ project: ProjectSummary, feedback: String) {
+        enqueue(project, ["script-revise", "--project", project.id.path, "--feedback", feedback],
+                title: "Viết lại kịch bản theo nhận xét")
+    }
+
     func cancel(_ project: ProjectSummary) {
         if let job = runState(project.id).jobID { queue.cancel(job) }
     }
@@ -162,6 +168,32 @@ final class AppModel {
         if !updates.isEmpty { _ = try await setSettings(dir, updates) }
         reload()
         return dir
+    }
+
+    /// `recap project-rename`: new title, folder renamed to match. Returns the (possibly new) folder.
+    func renameProject(_ project: URL, title: String) async throws -> URL {
+        guard !isBusy(project) else { throw AppError("Đang có tác vụ cho dự án này, hãy đợi nó xong rồi đổi tên") }
+        writing.insert(project)
+        defer { writing.remove(project) }
+        let outcome = try await client.run(["project-rename", "--project", project.path, "--title", title])
+        if let failure = outcome.failure { throw AppError(failure) }
+        guard let path = outcome.result?["project"]?.stringValue else { throw AppError("Worker không trả về thư mục dự án") }
+        let renamed = URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
+        if renamed != project {  // the log and the open editor follow the project
+            runStates[renamed] = runStates.removeValue(forKey: project)
+            editors[renamed] = editors.removeValue(forKey: project)
+        }
+        reload()
+        return renamed
+    }
+
+    /// Moves the project folder to the Trash (the film itself is untouched: the project only links to it).
+    func trashProject(_ project: URL) throws {
+        guard !isBusy(project) else { throw AppError("Đang có tác vụ cho dự án này, hãy huỷ hoặc đợi nó xong rồi xoá") }
+        try FileManager.default.trashItem(at: project, resultingItemURL: nil)
+        runStates[project] = nil
+        editors[project] = nil
+        reload()
     }
 
     /// `recap set`; returns the stages marked stale.
@@ -246,6 +278,16 @@ final class AppModel {
         if let failure = outcome.failure { throw AppError(failure) }
         guard let text = outcome.result?["text"]?.stringValue else { throw AppError("Claude không trả về câu nào") }
         return text
+    }
+
+    /// `recap characters-save`: saves the naming of the "Nhân vật" tab; returns the stages marked stale.
+    func saveNaming(_ project: URL, payload: Data) async throws -> [String] {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "RecapStudio", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: "naming-\(UUID().uuidString).json")
+        try payload.write(to: file, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: file) }
+        return try await staleCommand(project, ["characters-save", "--project", project.path, "--file", file.path])
     }
 
     /// `recap beat-mark` (nil clears the mark); returns the stages marked stale.

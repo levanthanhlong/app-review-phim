@@ -13,6 +13,8 @@ final class ScriptEditorState {
     private(set) var loadError: String?
     var message: String?
     private(set) var isSaving = false
+    /// Notes being written for "Nhận xét & viết lại" (kept when the sheet or the tab is closed).
+    var feedbackDraft = ""
     /// A newer script.yaml (e.g. the script stage ran again) that arrived while there were unsaved edits.
     private(set) var newerOnDisk: ScriptDocument?
 

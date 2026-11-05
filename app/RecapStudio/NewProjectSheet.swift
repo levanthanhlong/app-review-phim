@@ -8,6 +8,7 @@ enum NarrationStyle: String, CaseIterable, Identifiable {
     case kichTinh = "kich_tinh"
     case nghiemTuc = "nghiem_tuc"
     case haiMiaMai = "hai_mia_mai"
+    case doiThuongHai = "doi_thuong_hai"
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum NarrationStyle: String, CaseIterable, Identifiable {
         case .kichTinh: "Kịch tính, lôi cuốn"
         case .nghiemTuc: "Nghiêm túc, mạch lạc"
         case .haiMiaMai: "Hài hước, mỉa mai"
+        case .doiThuongHai: "Đời thường, hài hước, lém lỉnh"
         }
     }
 
@@ -24,6 +26,7 @@ enum NarrationStyle: String, CaseIterable, Identifiable {
         case .kichTinh: "Kịch tính"
         case .nghiemTuc: "Nghiêm túc"
         case .haiMiaMai: "Hài mỉa mai"
+        case .doiThuongHai: "Đời thường"
         }
     }
 }
@@ -35,6 +38,8 @@ struct EditableSettings: Equatable {
 
     var targetRatio = 0.2
     var style = NarrationStyle.kichTinh
+    var channelName = "Mắm Review Phim"
+    var narrator = "Mắm"
     var voice = "Hải Đăng"
     var ratePercent = 0
     var duckVolume = 0.0  // film sound under narration (0 = muted)
@@ -51,6 +56,8 @@ struct EditableSettings: Equatable {
     init(_ settings: ProjectSettings) {
         targetRatio = settings.targetRatio ?? targetRatio
         style = settings.narrationStyle.flatMap(NarrationStyle.init(rawValue:)) ?? style
+        channelName = settings.channelName ?? channelName
+        narrator = settings.narrator ?? narrator
         voice = settings.voice ?? voice
         ratePercent = settings.ttsRate.map(Durations.ratePercent) ?? ratePercent
         duckVolume = settings.duckVolume ?? duckVolume
@@ -67,6 +74,8 @@ struct EditableSettings: Equatable {
         [
             "target_ratio": String(format: "%.2f", targetRatio),
             "narration_style": style.rawValue,
+            "channel_name": channelName.trimmingCharacters(in: .whitespaces),
+            "narrator": narrator.trimmingCharacters(in: .whitespaces),
             "tts_engine": "vieneu",
             "voice": voice,
             "tts_rate": Durations.rateText(percent: ratePercent),
@@ -198,6 +207,10 @@ struct SettingsFields: View {
             MusicPickerView(settings: $settings)
         }
         Section("Kênh") {
+            TextField("Tên kênh", text: $settings.channelName, prompt: Text("Mắm Review Phim"))
+                .help("Cuối video mời khán giả like và đăng ký kênh này")
+            TextField("Người kể xưng là", text: $settings.narrator, prompt: Text("Mắm"))
+                .help("Ví dụ “Mắm”: “lát nữa Mắm kể”")
             BrandingField(settings: $settings)
         }
     }

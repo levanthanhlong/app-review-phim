@@ -18,7 +18,7 @@ from recap import config
 from recap.branding import BrandingError, check_image, load_style
 from recap.models import STAGE_NAMES, Project, Settings, StageStatus
 from recap.music import MusicError, check_music_file
-from recap.runner import Stage
+from recap.runner import Stage, StageFailure
 from recap.tts_engines import TTSError, rate_factor
 from recap.voices import check_voice
 
@@ -81,6 +81,17 @@ def apply_settings(
     return settings, save_marking_stale(project_dir, project.model_copy(update={"settings": settings}), stages)
 
 
+def _fingerprint_changed(project_dir: Path, project: Project, stage: Stage | None, saved: str | None) -> bool:
+    """Whether the stage's inputs changed. One that cannot tell (e.g. `ingest` once the film was
+    deleted: its outputs are still there) counts as unchanged, so other changes can be saved."""
+    if stage is None:
+        return False
+    try:
+        return saved != stage.fingerprint(project_dir, project)
+    except StageFailure:
+        return False
+
+
 def save_marking_stale(project_dir: Path, project: Project, stages: Mapping[str, Stage]) -> list[str]:
     """Save `project` after an input changed: a DONE stage whose fingerprint changed becomes STALE,
     and so does every DONE stage after it. Returns the stages marked stale."""
@@ -90,8 +101,7 @@ def save_marking_stale(project_dir: Path, project: Project, stages: Mapping[str,
         state = project.stages[name]
         if state.status != StageStatus.DONE:
             continue
-        stage = stages.get(name)
-        changed = stage is not None and state.fingerprint != stage.fingerprint(project_dir, project)
+        changed = _fingerprint_changed(project_dir, project, stages.get(name), state.fingerprint)
         if stale or changed:
             new_states[name] = state.model_copy(update={"status": StageStatus.STALE})
             stale.append(name)

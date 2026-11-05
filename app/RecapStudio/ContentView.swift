@@ -1,3 +1,4 @@
+import AppKit
 import RecapKit
 import SwiftUI
 
@@ -53,11 +54,36 @@ struct ProjectListView: View {
     @Binding var selection: URL?
     let onNew: (URL?) -> Void
 
+    @State private var renaming: ProjectSummary?
+    @State private var newTitle = ""
+    @State private var deleting: ProjectSummary?
+    @State private var error: String?
+
     var body: some View {
         List(model.projects, selection: $selection) { project in
             ProjectRow(project: project, isRunning: model.queue.isRunning(project: project.id))
                 .tag(project.id)
+                .contextMenu { menu(project) }
         }
+        .alert("Đổi tên dự án", isPresented: isPresent($renaming)) {
+            TextField("Tên dự án", text: $newTitle)
+            Button("Đổi tên") { if let project = renaming { rename(project) } }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("Thư mục dự án cũng được đổi theo tên mới. Các bước đã chạy được giữ nguyên.")
+        }
+        .confirmationDialog("Xoá dự án “\(deleting?.file.title ?? "")”?", isPresented: isPresent($deleting)) {
+            Button("Chuyển vào Thùng rác", role: .destructive) { if let project = deleting { trash(project) } }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("Cả thư mục dự án (kịch bản, giọng đọc, video đã xuất) vào Thùng rác, lấy lại được từ đó. File phim gốc không bị xoá.")
+        }
+        .alert("Không làm được", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(error ?? "")
+        }
+        .onDeleteCommand { if let project = model.project(selection) { deleting = project } }
         .overlay {
             if model.projects.isEmpty {
                 ContentUnavailableView("Chưa có dự án", systemImage: "plus.rectangle.on.folder",
@@ -76,6 +102,46 @@ struct ProjectListView: View {
             }
         }
         .navigationTitle("RecapStudio")
+    }
+
+    @ViewBuilder private func menu(_ project: ProjectSummary) -> some View {
+        let isBusy = model.isBusy(project.id)
+        Button("Đổi tên…") {
+            newTitle = project.file.title
+            renaming = project
+        }
+        .disabled(isBusy)
+        Button("Hiện trong Finder") { NSWorkspace.shared.activateFileViewerSelecting([project.id]) }
+        Divider()
+        Button("Chuyển vào Thùng rác…", role: .destructive) { deleting = project }
+            .disabled(isBusy)
+        if isBusy { Text("Đang có tác vụ: đợi xong mới đổi tên hay xoá được") }
+    }
+
+    private func isPresent(_ item: Binding<ProjectSummary?>) -> Binding<Bool> {
+        Binding(get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } })
+    }
+
+    private func rename(_ project: ProjectSummary) {
+        let title = newTitle
+        let wasSelected = selection == project.id
+        Task {
+            do {
+                let renamed = try await model.renameProject(project.id, title: title)
+                if wasSelected { selection = renamed }
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func trash(_ project: ProjectSummary) {
+        do {
+            try model.trashProject(project.id)
+            if selection == project.id { selection = nil }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 

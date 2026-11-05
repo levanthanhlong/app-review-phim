@@ -32,6 +32,7 @@ from recap.inspect_rules import (
     Region,
     TextBox,
     beats_to_skip,
+    black_bars,
     find_overlays,
     flag_frames,
     refine_region,
@@ -59,7 +60,7 @@ MAX_BAR_DIFF = 0.05  # bars on opposite sides differ by at most this share of th
 CROPDETECT_TIMEOUT_SEC = 600
 CACHE_EVERY = 100  # frames between saves of the OCR cache, so a cancel or crash can resume
 OCR_VERSION = "1"  # bump when what `recognize` returns changes
-RULES_VERSION = "4"  # bump when `inspect_rules` decides differently
+RULES_VERSION = "6"  # bump when `inspect_rules` decides differently
 OK_HEIGHT, ACCEPTABLE_HEIGHT = 1080, 720
 PROGRESS_EVERY = 20
 
@@ -111,10 +112,10 @@ class InspectStage:
         duration = ctx.project.media.duration if ctx.project.media else 0.0
         frames_dir = ctx.path(FRAMES_DIR)
         try:
-            frames, static = self._read_frames(ctx, proxy, frames_dir, duration)
+            frames, stack = self._read_frames(ctx, proxy, frames_dir, duration)
         finally:
             shutil.rmtree(frames_dir, ignore_errors=True)
-        report = self._report(ctx, frames, static, duration, proxy)
+        report = self._report(ctx, frames, stack, duration, proxy)
         config.write_json_atomic(ctx.path(INSPECT), report)
         self._log_summary(ctx, report)
         ctx.emitter.artifact(self.name, INSPECT)
@@ -135,7 +136,7 @@ class InspectStage:
         files = sorted(frames_dir.glob("*.jpg"))
         if not files:
             raise StageFailure("inspect_failed", "Không lấy được khung hình nào từ proxy")
-        return self._ocr_frames(ctx, files), self._static(files)
+        return self._ocr_frames(ctx, files), self._gray_stack(files)
 
     def _ocr_frames(self, ctx: StageContext, files: list[Path]) -> list[FrameText]:
         """Text in every frame. Results are cached as they come (a cancelled run resumes); a frame
@@ -169,16 +170,17 @@ class InspectStage:
         return frames
 
     @staticmethod
-    def _static(files: list[Path]) -> np.ndarray:
+    def _gray_stack(files: list[Path]) -> np.ndarray:
+        """Up to ~150 small grey frames: for static pixels (logos) and black bars."""
         step = max(1, len(files) // STATIC_FRAMES)
-        return static_mask(np.stack([_gray(f) for f in files[::step]]))
+        return np.stack([_gray(f) for f in files[::step]])
 
     # ---- decisions ---------------------------------------------------------------------------
 
-    def _report(self, ctx: StageContext, frames: list[FrameText], static: np.ndarray, duration: float, proxy: Path) -> dict[str, Any]:
+    def _report(self, ctx: StageContext, frames: list[FrameText], stack: np.ndarray, duration: float, proxy: Path) -> dict[str, Any]:
         overlays = find_overlays(frames)
-        watermarks = _watermarks(overlays, static)
-        overlay_ads, flags = split_ads(flag_frames(frames, overlays, duration))
+        watermarks = _watermarks(overlays, static_mask(stack))
+        overlay_ads, flags = split_ads(flag_frames(frames, overlays))
         ranges = skip_ranges(flags, duration, interval=1 / SAMPLE_FPS)
         ads = [{"start": a.start, "end": a.end, **_region_dict(a.region, a.text)} for a in outside(ad_blurs(overlay_ads, 1 / SAMPLE_FPS), ranges)]
         beats = SCENES_ADAPTER.validate_json(ctx.path(SCENES).read_bytes()) if ctx.path(SCENES).is_file() else []
@@ -188,7 +190,7 @@ class InspectStage:
                        "quality": _quality(ctx.project)},
             "watermarks": watermarks,
             "subtitles": [_region_dict(o.region, o.text) for o in overlays if o.kind == "subtitles"],
-            "letterbox": _letterbox(proxy, ctx),
+            "letterbox": _letterbox(proxy, ctx, stack),
             "ad_blurs": ads,
             "skip_ranges": [asdict(r) for r in ranges],
             "skip_beats": beats_to_skip(beats, ranges),
@@ -215,7 +217,14 @@ def _watermarks(overlays: list[Overlay], static: np.ndarray) -> list[dict[str, A
     return [_region_dict(region, text) for region, text in found]
 
 
-def _letterbox(proxy: Path, ctx: StageContext) -> Region | None:
+def _letterbox(proxy: Path, ctx: StageContext, stack: np.ndarray) -> dict[str, float] | None:
+    """Black bars by ffmpeg's cropdetect, else by the frames' dark rows and columns (which still finds
+    bars with a translator's credit or subtitles written in them)."""
+    region = _cropdetect(proxy, ctx) or black_bars(stack)
+    return asdict(region) if region else None
+
+
+def _cropdetect(proxy: Path, ctx: StageContext) -> Region | None:
     info = media.probe(proxy)
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-i", str(proxy),
            "-vf", f"fps={CROP_SAMPLE_FPS:g},cropdetect=limit=24:round=2:reset=1", "-f", "null", "-"]  # fmt: skip
@@ -228,8 +237,7 @@ def _letterbox(proxy: Path, ctx: StageContext) -> Region | None:
     if result.returncode != 0 or not info.width or not info.height:
         ctx.emitter.log("warning", "Không dò được viền đen của nguồn, bỏ qua bước này")
         return None
-    region = parse_cropdetect(result.stderr, info.width, info.height)
-    return asdict(region) if region else None  # type: ignore[return-value]
+    return parse_cropdetect(result.stderr, info.width, info.height)
 
 
 def _gray(file: Path) -> np.ndarray:

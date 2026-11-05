@@ -20,7 +20,7 @@ def film(extra: dict[int, tuple[TextBox, ...]]) -> list[FrameText]:
 
 
 def inspect(frames: list[FrameText]) -> tuple[list, list[TimedBlur]]:
-    flags = flag_frames(frames, find_overlays(frames), DURATION)
+    flags = flag_frames(frames, find_overlays(frames))
     overlay_ads, others = split_ads(flags)
     return skip_ranges(others, DURATION), ad_blurs(overlay_ads)
 

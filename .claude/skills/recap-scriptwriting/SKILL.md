@@ -12,7 +12,15 @@ cũng chính là đoạn stage `script` chèn vào prompt gửi cho `claude -p`.
 sửa file đó (không chép nội dung sang chỗ khác). Sửa xong, stage `script` sẽ tự viết lại kịch bản ở
 lần chạy sau (fingerprint có hash của cẩm nang).
 
-Các quy tắc bắt buộc và schema YAML nằm ở `worker/recap/prompts/write_script.md`.
+Cẩm nang được soạn từ skill `recap-script-vi` (thư mục `recap-script-vi/` ở gốc repo: giọng kênh Mắm Review
+Phim, khung hook → mở truyện → leo thang → cao trào → kết → nhận xét và kêu gọi, kho từ lóng). Skill đó viết
+Markdown có thẻ [CẢNH]/[NGẮT]; ở đây không dùng thẻ: cảnh đi kèm là `clips`, tiếng phim giữ nguyên là dòng
+`original`.
+
+Các quy tắc bắt buộc và schema YAML nằm ở `worker/recap/prompts/write_script.md`. Tên kênh và cách người
+kể xưng hô lấy từ settings của dự án (`channel_name`, `narrator`; mặc định "Mắm Review Phim", "Mắm"),
+phong cách từ `narration_style` (`kich_tinh`, `nghiem_tuc`, `hai_mia_mai`, `doi_thuong_hai`: chỉ phong cách
+cuối mới dùng kho từ lóng). Tên nhân vật (kèm `(nam)`/`(nữ)`) lấy từ `work/character_choices.json`.
 Validate kịch bản: `worker/recap/script_model.py` (`validate_items`, `load_script`).
 
 ## Khi sửa hoặc viết lại `script.yaml` của một dự án
@@ -36,7 +44,7 @@ Quy trình:
 
 1. Đọc cẩm nang, đọc kịch bản và các beat liên quan (khi viết lại một câu, đọc thêm 3 câu trước và 3 câu sau).
 2. Chỉ ra cụ thể câu nào cứng/máy/lặp và vì sao (dựa vào bảng "Tránh / Nên viết" của cẩm nang).
-3. Viết lại, rồi kiểm tra theo mục 6 của cẩm nang và đếm từ so với thời lượng clip.
+3. Viết lại, rồi kiểm tra theo mục 7 của cẩm nang và đếm từ so với thời lượng clip.
 4. Ghi `script.yaml`, rồi kiểm tra bằng:
    `cd worker && .venv/bin/python -c "from pathlib import Path; from recap.script_model import load_script; load_script(Path('<dự án>/script.yaml')); print('ok')"`
 5. Sau khi sửa, chạy lại từ `tts`: `cd worker && .venv/bin/python -m recap run --project <dự án> --from tts`

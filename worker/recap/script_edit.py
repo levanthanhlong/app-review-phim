@@ -20,7 +20,7 @@ from recap.models import DESCRIBED_ADAPTER, SCENES_ADAPTER, Beat, DescribedBeat,
 from recap.runner import Stage
 from recap.script_model import Item, load_script, parse_tc, validate_items
 from recap.settings_update import save_marking_stale
-from recap.stages.script import DESCRIBED, SCRIPT, STYLES, _dump_yaml, format_rate
+from recap.stages.script import DESCRIBED, SCRIPT, _dump_yaml, format_rate, voice_values
 from recap.tts_engines import TTSError
 from recap.voices import settings_words_per_sec
 
@@ -218,7 +218,7 @@ def rewrite_line(
     clip_sec = sum(parse_tc(c["end"]) - parse_tc(c["start"]) for c in item["clips"])
     words = min(MAX_WORDS, max(MIN_WORDS, round(clip_sec * rate)))
     values = {
-        "style": STYLES.get(settings.narration_style, settings.narration_style),
+        **voice_values(settings),
         "title": project.title,
         "line_id": line_id,
         "text": item["text"],

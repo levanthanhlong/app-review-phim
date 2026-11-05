@@ -74,7 +74,7 @@ struct ProjectFileTests {
 
     @Test func stagesFollowTheWorkerOrderWithMusicBeforeAssemble() {
         #expect(StageName.allCases.map(\.rawValue) == [
-            "ingest", "transcribe", "scenes", "inspect", "describe", "script", "tts", "music", "assemble", "export",
+            "ingest", "transcribe", "scenes", "inspect", "characters", "describe", "script", "tts", "music", "assemble", "export",
         ])
     }
 }

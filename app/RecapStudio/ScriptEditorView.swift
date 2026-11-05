@@ -14,6 +14,7 @@ struct ScriptEditorView: View {
     @State private var timeline: [String: TimelineEntry] = [:]
     @State private var beats: [SceneBeat] = []
     @State private var pickingClip: ScriptLine?
+    @State private var isRevising = false
 
     private var editor: ScriptEditorState { model.scriptEditor(project.id) }
     private var isBusy: Bool { model.isBusy(project.id) }
@@ -40,6 +41,11 @@ struct ScriptEditorView: View {
             }
         }
         .task(id: reloadKey) { await reload() }
+        .sheet(isPresented: $isRevising) {
+            ReviseScriptSheet(draft: Bindable(editor).feedbackDraft) { feedback in
+                model.reviseScript(project, feedback: feedback)
+            }
+        }
         .sheet(item: $pickingClip) { line in
             ClipPickerSheet(line: line, beats: beats, marks: BeatMarks.load(from: project.id),
                             autoSkips: SourceInspection.load(from: project.id)?.skipBeats ?? [:], projectDir: project.id) { beat in
@@ -82,6 +88,10 @@ struct ScriptEditorView: View {
             }
             Spacer()
             if editor.isSaving { ProgressView().controlSize(.small) }
+            Button("Nhận xét & viết lại", systemImage: "text.bubble") { isRevising = true }
+                .disabled(editor.isDirty || editor.isSaving || isBusy)
+                .help(editor.isDirty ? "Lưu các chỗ đang sửa trước, Claude sẽ viết lại từ bản đã lưu"
+                      : isBusy ? "Đợi tác vụ của dự án này xong" : "Viết nhận xét, Claude viết lại cả kịch bản theo đó")
             Button("Hoàn tác", systemImage: "arrow.uturn.backward") { editor.revert() }
                 .disabled(!editor.isDirty || editor.isSaving)
             Button("Lưu", systemImage: "square.and.arrow.down") { save(then: nil) }

@@ -40,7 +40,7 @@
 | Claude Code CLI | Đã cài và đã đăng nhập (`claude -p "hi"` chạy được) |
 | Xcode | 16+, Swift 5.10+/6, SwiftUI |
 
-Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 Turbo, ONNX, model ~1GB trong HF cache trên SSD), `onnxruntime==1.22.1` (ghim: bản ≥1.23 từ chối file weights dạng symlink của HF cache), `edge-tts`, `pyyaml`, `pydantic`, `ollama`, `pillow`, `numpy`, `pyobjc-framework-Vision` (đọc chữ trong hình bằng macOS Vision, cho stage `inspect`).
+Python packages: `mlx-whisper`, `scenedetect[opencv]`, `vieneu` (VieNeu-TTS v3 Turbo, ONNX, model ~1GB trong HF cache trên SSD), `onnxruntime==1.22.1` (ghim: bản ≥1.23 từ chối file weights dạng symlink của HF cache), `edge-tts`, `pyyaml`, `pydantic`, `ollama`, `pillow`, `numpy`, `pyobjc-framework-Vision` (đọc chữ trong hình bằng macOS Vision, cho stage `inspect`), OpenCV (có sẵn qua `scenedetect[opencv]`) + `scipy` (tìm và gom mặt, cho stage `characters`). Model mặt OpenCV Zoo: YuNet (MIT) và SFace (Apache-2.0), khoảng 37MB, tự tải lần đầu về `/Volumes/ExternalSSD/cache/recap-models` (đổi bằng `RECAP_MODELS_DIR`), kiểm tra SHA-256.
 
 Cài trên máy mới: `./setup.sh` (công cụ, worker, model, app; mọi cache và model đặt trên ExternalSSD). Tạo file cài app: `./make_dmg.sh` (mục 7.1).
 
@@ -69,8 +69,9 @@ Cài trên máy mới: `./setup.sh` (công cụ, worker, model, app; mọi cache
                │ chạy: worker/.venv/bin/python -m recap <stage> │ stdout: JSON Lines
                ▼                                               │ (progress/log/result)
 ┌──────────────────────────── worker (Python CLI "recap") ───────────────────┐
-│ ingest → transcribe → scenes → inspect → describe → script → tts → music   │
-│ ffmpeg   mlx-whisper  PySceneDetect  Vision OCR  Ollama VL  claude -p VieNeu│
+│ ingest → transcribe → scenes → inspect → characters → describe → script     │
+│ ffmpeg   mlx-whisper  PySceneDetect  Vision OCR  YuNet/SFace  Ollama  claude │
+│                        → tts → music   (VieNeu)                             │
 │                                  → assemble → export   (ffmpeg)             │
 └────────────────────────────────────────────────────────────────────────────┘
                      đọc/ghi:  <Project>.recap/  (thư mục dự án)
@@ -99,6 +100,7 @@ RecapStudio/
 │   │   │   ├── transcribe.py
 │   │   │   ├── scenes.py
 │   │   │   ├── inspect.py    # OCR + luật: watermark, quảng cáo, credit, viền đen
+│   │   │   ├── characters.py # mặt người → nhân vật, tên nghe được trong thoại
 │   │   │   ├── describe.py
 │   │   │   ├── script.py
 │   │   │   ├── tts.py
@@ -114,6 +116,11 @@ RecapStudio/
 │   │   ├── ad_blurs.py       # quảng cáo chèn đè → vùng làm mờ có thời gian
 │   │   ├── ocr.py            # macOS Vision
 │   │   ├── cleanup.py        # filter ffmpeg: làm mờ watermark/quảng cáo, cắt viền đen
+│   │   ├── faces.py          # YuNet + SFace (OpenCV): tìm mặt, vector đặc trưng
+│   │   ├── characters.py     # gom mặt, tên người dùng đặt → tên theo từng beat
+│   │   ├── character_names.py # tên riêng trong thoại (Claude), kiểm lại với thoại
+│   │   ├── character_edit.py # lệnh characters-save
+│   │   ├── script_revise.py  # viết lại cả kịch bản theo nhận xét
 │   │   ├── beat_marks.py     # đánh dấu beat của người dùng + beat inspect tự bỏ
 │   │   ├── branding.py       # banner kênh, logo, brand.json
 │   │   ├── script_edit.py    # lệnh cho Script Editor / Scene Browser
@@ -144,6 +151,9 @@ RecapStudio/
 │   ├── keyframes/B0001.jpg ...
 │   ├── inspect.json          # kết quả stage inspect (mục 5.4)
 │   ├── inspect/ocr.json      # cache chữ đọc được, 1 khung/giây (ghi dần, chạy tiếp được)
+│   ├── characters.json       # kết quả stage characters (mục 5.5)
+│   ├── characters/faces/f00001.jpg ... # ảnh mặt cho tab Nhân vật; faces.npz, names.json là cache
+│   ├── character_choices.json # tên người dùng đặt: {confirmed, names, merged, ignored}
 │   ├── beat_marks.json       # đánh dấu của người dùng: {beat_id: star|skip|keep}
 │   ├── scenes_described.json
 │   ├── digest/part_01.txt ...  # danh sách cảnh rút gọn, gửi cho LLM
@@ -172,7 +182,10 @@ Mỗi stage: `python -m recap <stage> --project <path> [--force]`.
 
 Lệnh cho app, chạy trên dự án (ngoài hàng đợi job nặng; mọi thay đổi đánh dấu `stale` như `set`):
 - `set --project P key=value …` (mục 7.1).
+- `project-rename --title T`: đổi tên dự án, thư mục đổi theo (`<tên>.recap`); trùng tên dự án khác thì báo `project_exists`. Các bước đã chạy giữ nguyên (fingerprint không phụ thuộc đường dẫn thư mục). Kết quả: `{project}` là thư mục mới.
 - `script-show` / `script-save --file EDIT.json` / `script-rewrite --line L0001 [--hint H]`: Script Editor (mục 7.2).
+- `script-revise --feedback "…"`: Claude viết lại cả kịch bản theo nhận xét (chạy trong hàng đợi, mục 4.5).
+- `characters-save --file NAMING.json`: lưu tên nhân vật từ tab Nhân vật (mục 4.3c). Kết quả gồm `stale` và `choices`.
 - `beat-mark --beat B0001 --mark star|skip|keep|none`: Scene Browser. Kết quả gồm `marks` và `auto_skips` (beat do `inspect` tự bỏ, kèm lý do).
 - `music-choose --cue M01 --option N` / `music-edit --cue M01 [--prompt P] [--alt-prompt P] [--reroll]`: nhạc AI (mục 4.7).
 
@@ -207,16 +220,32 @@ Tìm những thứ trong phim gốc không được lọt vào video tóm tắt.
 1. Lấy 1 khung/giây từ proxy, đọc chữ bằng macOS Vision (mức accurate, tiếng Việt + Anh, khoảng 30ms/khung). Kết quả cache trong `work/inspect/ocr.json`, ghi dần mỗi 100 khung, nên huỷ giữa chừng thì chạy tiếp được; đổi beat thì chỉ áp lại luật. Khung Vision không đọc được thì coi như không có chữ (cảnh báo, không dừng pipeline). Khung ảnh tạm bị xoá sau khi xong.
 2. **Bản đồ điểm ảnh tĩnh** từ khoảng 150 khung thu nhỏ 240×135: điểm có độ sáng lệch ≤ 12 so với trung vị ở ≥ 70% số khung và sáng hơn 24.
 3. **Luật** (`inspect_rules.py`, chỉ tính chữ có độ tin cậy ≥ 0.5):
+   - **Dải phụ đề**: chữ nằm giữa khung (lệch tâm ≤ 20%), thấp ≤ 12% khung, nội dung thay đổi, xuất hiện ở ≥ 10% số khung (và ≥ 10 dòng) thì cả dải ngang đó là phụ đề gắn cứng; chữ trong dải không bị gắn cờ.
    - Chữ ở cùng chỗ trong ≥ 30% số khung là lớp phủ: nội dung giống nhau là **watermark** (vùng được nới ra theo cụm điểm tĩnh quanh chữ để phủ cả logo), nội dung thay đổi là **phụ đề gắn cứng** (để nguyên). Logo không chữ: cụm điểm tĩnh liền nhau lớn nhất ở mỗi góc (vùng 30%).
-   - Chữ ngoài lớp phủ có từ khoá quảng cáo (tài trợ, nhà cái, hotline, tên miền…), credit (đạo diễn, diễn viên, tập N…), hậu trường, tuyên bố miễn trừ, hoặc thẻ tiêu đề ở 90 giây đầu / 180 giây cuối thì gắn cờ. **Cờ chỉ được tính khi có ≥ 2 cờ trong vòng 3 giây** (thẻ thật hiện vài giây; biển hiệu thoáng qua hay chữ đọc nhầm thì không).
+   - Chữ ngoài lớp phủ có từ khoá quảng cáo (tài trợ, nhà cái, hotline, tên miền…), credit (đạo diễn, diễn viên, tập N…), hậu trường hoặc tuyên bố miễn trừ thì gắn cờ. (Luật "thẻ tiêu đề ở đầu/cuối phim" đã bỏ: phim vietsub có phụ đề ở mọi khung nên luật này bỏ nhầm cả phút đầu.) **Cờ chỉ được tính khi có ≥ 2 cờ trong vòng 3 giây** (thẻ thật hiện vài giây; biển hiệu thoáng qua hay chữ đọc nhầm thì không).
    - Quảng cáo **chèn đè lên phim** (chữ thấp hơn 8% khung và không nằm giữa khung) thì **làm mờ đúng vùng đó trong lúc nó hiện**, giữ cảnh (`ad_blurs`). Quảng cáo dạng thẻ (chữ to hoặc ở giữa) thì bỏ cảnh.
    - Cờ trong 15% đầu phim thì bỏ từ đầu tới đó; cờ trong 25% cuối thì bỏ từ đó tới hết (thẻ mở đầu, credit, hậu trường). Beat chạm đoạn bỏ thì bị bỏ, kèm lý do.
-4. **Viền đen**: `cropdetect` trên proxy (1 mẫu/2 giây). Chỉ cắt khi một kết quả chiếm đa số mẫu, giữ ≥ 50% khung, viền hai bên cân nhau (lệch ≤ 5%), và bỏ đi ≥ 5% khung.
+4. **Viền đen**: `cropdetect` trên proxy (1 mẫu/2 giây). Chỉ cắt khi một kết quả chiếm đa số mẫu, giữ ≥ 50% khung, viền hai bên cân nhau (lệch ≤ 5%), và bỏ đi ≥ 5% khung. `cropdetect` không ra kết quả thì đo trung vị độ sáng theo hàng/cột của các khung thu nhỏ: viền tối (≤ 16) dày ≥ 3% mỗi bên, hai bên lệch ≤ 5%.
 5. **Chất lượng nguồn**: cao ≥ 1080 là `ok`, ≥ 720 là `acceptable`, thấp hơn là `low` (cảnh báo nên tìm bản tốt hơn).
 
 Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùng cảnh này" trong Scene Browser); mọi mark của người dùng đều thắng cờ tự động. Đổi luật thì tăng `RULES_VERSION` để stage chạy lại (OCR vẫn dùng cache).
 
 Đo trên Cơm Nguội tập 136 (26 phút, 1080p): 52 giây (9 giây khi dùng cache OCR); tìm đúng watermark kênh gốc, bỏ 0–10s và 1354s–hết (24/169 beat).
+
+### 4.3c `characters` (nhân vật và tên)
+
+Để kịch bản gọi đúng tên nhân vật. Stage này **không bắt buộc** (như `inspect`).
+
+1. Lấy 1 khung/giây từ **phim gốc** (mặt to hơn bản 480p; mất phim gốc thì dùng proxy và cảnh báo), thu về rộng 960px. YuNet tìm mặt, chỉ giữ mặt rõ: điểm ≥ 0.9, rộng ≥ 5% khung, gần nhìn thẳng (mũi lệch ≤ 0.35 khoảng cách hai mắt). SFace tạo vector đặc trưng. Cache trong `work/characters/faces.npz` theo chữ ký video.
+2. Gom mặt bằng average-linkage, khoảng cách cosine 0.65. Người thấy ở < 3 khung là vai quần chúng, không đưa ra. Mỗi nhân vật (C01 = nhiều thời lượng nhất) có danh sách beat xuất hiện và 6 ảnh mặt 160px.
+3. Claude tìm **tên riêng** trong thoại (`prompts/find_names.md`), trả JSON; tên nào không có thật trong thoại thì bỏ (chữ Thái/Lào/Khmer/CJK so khớp chuỗi con, chữ khác theo ranh giới từ). Cache theo transcript + model + prompt.
+4. Ghi `characters.json`. Tìm mặt lại từ đầu (video đổi) thì mã nhân vật mang nghĩa khác nên xoá tên đã đặt.
+
+**Người dùng đặt tên** ở tab Nhân vật (mục 7.2), lưu qua `characters-save` vào `character_choices.json`: tên cho từng nhân vật (tên trong phim, tên gọi chung như "cô gái", "người mẹ", "bác sĩ", hoặc tự gõ), **giới tính** nam/nữ cho tên riêng (tên dùng trong prompt thành "Cha (nữ)"), **gộp** hai thẻ là cùng một người, **bỏ qua** vai phụ.
+
+**Tên đi vào bước mô tả cảnh**: `describe` chạy sau `characters`; với beat có người đã đặt tên, prompt mô tả thêm "Người có mặt trong cảnh (đã được xác định, tin thông tin này hơn điều bạn đoán từ ảnh): Cha (nữ)". Lý do: model VL đoán người và giới tính từ một khung (phim Thái: nữ chính bị tả là "người đàn ông lớn tuổi" ở 21 cảnh). Chưa đặt tên thì `describe` dừng với `characters_unnamed` trước khi mô tả (đỡ phải mô tả lại). Đổi tên chỉ mô tả lại các beat có người đó (cache theo prompt từng beat); beat không có người đặt tên giữ prompt và cache cũ. "Bỏ qua, để máy tự gọi tên" (`{"skip": true}`) lưu xác nhận không có tên.
+
+Đo trên "Thất Tình (Thái Lan)" (15 phút, 720p): 263 mặt, 8 nhân vật, 3 tên nghe được (Hiro, Bat, Cha).
 
 ### 4.4 `describe`
 
@@ -237,13 +266,16 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
    claude -p "<nội dung prompts/write_script.md đã điền biến>" \
      --model <settings.claude_model> --output-format json < digest/part_01.txt
    ```
-   - Biến trong prompt: tên phim, phần thứ mấy/tổng số phần, **tóm tắt các phần trước** (lấy từ output phần trước), thời lượng mục tiêu cho phần này, phong cách kể (settings: nghiêm túc / hài mỉa mai / kịch tính), **tốc độ đọc của giọng đã chọn** (`{words_per_sec}` = tốc độ đo được × `tts_rate`; giọng chưa đo thì dùng 3).
+   - **Giọng kênh** (soạn từ skill `recap-script-vi`): `narration_guide.md` gồm nguyên tắc kể nhân quả, đọc nội tâm, bình luận mỗi 45–90 giây, vòng mở, nhịp, cầu nối văn hóa, khung cả video (hook ≤ 80 từ → mở truyện → leo thang → cao trào → kết và giải thích → nhận xét và kêu gọi), kho từ lóng (chỉ phong cách "đời thường") và checklist tự kiểm. Người kể xưng `settings.narrator` (mặc định "Mắm"), cuối video mời like và đăng ký kênh `settings.channel_name` (mặc định "Mắm Review Phim"). Mỗi phần được cho biết **vị trí** của nó: một phần thì đi trọn khung; phần đầu có hook và mở truyện; phần giữa nối và leo thang; phần cuối có cao trào, kết, nhận xét và kêu gọi. Thẻ [CẢNH]/[NGẮT]/[NHẠC] của skill không dùng: cảnh là `clips`, tiếng phim là dòng `original`. Đổi tên kênh hay cách xưng thì kịch bản thành `stale`.
+   - Biến trong prompt: tên phim, phần thứ mấy/tổng số phần, **tóm tắt các phần trước** (lấy từ output phần trước), thời lượng mục tiêu cho phần này, phong cách kể (settings: nghiêm túc / hài mỉa mai / kịch tính / đời thường, hài hước, lém lỉnh), **tốc độ đọc của giọng đã chọn** (`{words_per_sec}` = tốc độ đo được × `tts_rate`; giọng chưa đo thì dùng 3).
    - Ước tính thời lượng = Σ(số từ / words_per_sec + 0.25s đệm mỗi câu kể) + Σ độ dài dòng original. Đổi giọng thì fingerprint của `script` đổi theo. `script.yaml` lưu `words_per_sec` đã dùng.
    - Không cấp tool cho Claude (chỉ nhận text). Lấy trường `result` trong JSON.
 3. **Validate** YAML theo schema (mục 5.2): beat id phải tồn tại; mốc thời gian nằm trong beat; thời lượng ước tính gần mục tiêu ±15%. Nếu sai thì gọi lại **tối đa 2 lần**, kèm thông báo lỗi cụ thể.
    - Mỗi clip dưới lời kể dài 2–8 giây, mỗi đoạn `original` 5–10 giây (validate chặn clip > 8s và original > 10s). Lời kể nói nhân quả và chuyển ý, không tả lại hình hay nhắc lại thoại; kết bằng nhận xét của kênh và lời mời bình luận (`prompts/narration_guide.md`).
    - **Đánh dấu beat**: beat bị bỏ (mark `skip`, hoặc `inspect` tự bỏ mà người dùng không mark) không có trong digest nên Claude không dùng được. Beat ⭐ được gắn cờ `⭐ QUAN TRỌNG` trong digest và prompt thêm quy tắc phải dùng. Mọi beat đều bị bỏ thì báo lỗi, nói rõ bao nhiêu beat do `inspect` bỏ. Fingerprint có thêm chữ ký của các mark (chỉ khi có mark).
    - Thời lượng mục tiêu = `target_ratio` × thời lượng **cả phim** (kể cả đoạn bị bỏ).
+   - **Tên nhân vật**: `characters` tìm được người mà người dùng chưa lưu (hay bỏ qua) phần đặt tên thì `script` dừng với `characters_unnamed`; banner lỗi có nút "Đặt tên nhân vật". Đã đặt tên thì mỗi dòng digest thêm `| Nhân vật: Cha, Hiro` (người có mặt trong beat), prompt liệt kê các tên và yêu cầu gọi đúng tên đó, hiểu "(nam)/(nữ)" là để xưng hô chứ không đọc ra, và khi phần "Hình" trái với dòng "Nhân vật:" thì tin dòng "Nhân vật:". Fingerprint có thêm chữ ký tên theo beat (chỉ khi có tên), nên đổi tên thì kịch bản thành `stale`.
+6. **Viết lại theo nhận xét** (`script-revise`, nút "Nhận xét & viết lại" trong Script Editor): chia phần như trên, mỗi phần gửi Claude prompt của stage + nhận xét, kèm digest và các dòng hiện tại của phần đó (cả phần sửa tay). Validate và retry như stage. Chỉ ghi khi mọi phần đều xong; bản cũ vào `work/script_backups/`. Stage `script` vẫn `done` với fingerprint cũ (chỉ đổi giờ xong để app tải lại), các stage sau thành `stale`.
 4. Gộp các phần thành `script.yaml`. Nếu `script.yaml` cũ khác bản mới thì lưu bản cũ vào `work/script_backups/` (giữ lại phần sửa tay).
 5. Lỗi hết hạn mức hoặc lỗi CLI: dừng stage với `error.code = "llm_quota"` hoặc `"llm_failed"`, giữ nguyên các phần đã xong để chạy tiếp sau.
 
@@ -305,7 +337,9 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
   "settings": {
     "target_ratio": 0.2,
     "language": "auto",
-    "narration_style": "kich_tinh",
+    "narration_style": "kich_tinh",   // kich_tinh | nghiem_tuc | hai_mia_mai | doi_thuong_hai
+    "channel_name": "Mắm Review Phim",
+    "narrator": "Mắm",
     "tts_engine": "vieneu",
     "voice": "Hải Đăng",
     "tts_rate": "+0%",
@@ -339,7 +373,7 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
 }
 ```
 
-Thứ tự stage: `ingest, transcribe, scenes, inspect, describe, script, tts, music, assemble, export`. `status`: `pending | running | done | failed | stale`. Khi người dùng đổi một setting, đánh dấu `stale` cho các stage phụ thuộc vào setting đó, ví dụ đổi giọng thì `tts`, `assemble`, `export` thành `stale`.
+Thứ tự stage: `ingest, transcribe, scenes, inspect, characters, describe, script, tts, music, assemble, export`. `status`: `pending | running | done | failed | stale`. Khi người dùng đổi một setting, đánh dấu `stale` cho các stage phụ thuộc vào setting đó, ví dụ đổi giọng thì `tts`, `assemble`, `export` thành `stale`.
 
 ### 5.2 `script.yaml`
 
@@ -383,6 +417,20 @@ items:
 
 Mọi vùng tính theo tỉ lệ khung (0–1, gốc trên trái). `letterbox` là phần giữ lại (null = không cắt).
 
+### 5.5 `characters.json` (do `characters` tạo ra)
+
+```json
+{
+  "faces_key": "<chữ ký video>|1",
+  "characters": [{"id": "C01", "faces": 187, "screen_sec": 187.0, "beats": ["B0003", "B0004"],
+                  "pictures": ["characters/faces/f00239.jpg"]}],
+  "names": [{"name": "Hiro", "count": 1, "examples": ["Hiro... ไขยวะ"]}],
+  "names_warning": null
+}
+```
+
+`pictures` tính từ `work/`. `character_choices.json`: `{"confirmed": true, "names": {"C01": "Cha"}, "merged": {"C06": "C01"}, "ignored": ["C08"], "genders": {"C01": "nữ"}}`.
+
 ---
 
 ## 6. Giao thức JSON Lines (worker → app)
@@ -425,6 +473,7 @@ Mỗi dòng stdout là một JSON object:
 
 1. **Project List** (sidebar)
    - Danh sách dự án: thumbnail, tên, thời lượng gốc → thời lượng mục tiêu, trạng thái tổng thể.
+   - Chuột phải một dự án: **Đổi tên…**, **Hiện trong Finder**, **Chuyển vào Thùng rác…** (có hỏi lại; phím Delete cũng được). Xoá là chuyển cả thư mục dự án vào Thùng rác của ổ chứa nó, lấy lại được; phim gốc không bị đụng tới. Đang có tác vụ thì không đổi tên hay xoá được.
    - Nút "Dự án mới": kéo thả file phim, nhập tên, chọn tỉ lệ hoặc thời lượng mục tiêu, phong cách kể, giọng đọc.
    - **Chọn giọng đọc** (khi tạo dự án và trong settings của dự án): danh sách lấy từ `recap voices`, giọng được khuyên dùng (`featured`) xếp trước, có lọc theo nam/nữ và vùng miền. Mỗi giọng có nút ▶︎ **nghe thử**, gọi `recap voice-preview` với câu mặc định hoặc câu người dùng nhập (ví dụ câu đầu của kịch bản). File nghe thử được cache theo (engine, voice, rate, text) trong thư mục cache của app. Có thanh trượt tốc độ (`tts_rate`). Đổi giọng thì đánh dấu `tts`, `assemble`, `export` thành `stale`.
 
@@ -441,11 +490,17 @@ Mỗi dòng stdout là một JSON object:
    - Beat do `inspect` tự bỏ hiện mờ với nhãn 🤖🚫 và lý do ("Tự động bỏ: credit: …"); nút **"Vẫn dùng cảnh này"** đặt mark `keep`. Bộ lọc "Bỏ qua" gồm cả beat tự bỏ. Hộp chọn clip trong Script Editor cũng ẩn các beat bị bỏ.
    - Đổi mark thì `script` thành `stale`; chạy lại sẽ viết kịch bản mới (bản cũ vào `work/script_backups/`).
 
+3b. **Nhân vật**
+   - Lưới thẻ nhân vật: 6 ảnh mặt, thời lượng trên màn hình, số cảnh. Bên phải là các tên nghe được trong phim, kèm số lần và câu thoại mẫu.
+   - Mỗi thẻ: ô tên, chọn giới tính (Không rõ / Nam / Nữ), menu "Chọn" (tên trong phim; tên gọi chung: người đàn ông, người phụ nữ, cô gái, chàng trai, người đi đường, người anh, người em gái, người mẹ, con ma, con quỷ, sinh vật lạ, cậu bé… và nghề nghiệp). Danh sách tên gọi chung sửa được ("Sửa danh sách tên chung…", lưu trong UserDefaults, dùng cho mọi dự án). "Gộp vào" một thẻ khác (cùng người), "Bỏ qua (vai phụ)".
+   - "Lưu tên" (⌘S) và "Bỏ qua, để máy tự gọi tên". Lưu xong thì báo các stage cần chạy lại.
+
 4. **Script Editor**
    - Bảng các dòng kịch bản: id, loại, text (sửa trực tiếp), clip (chọn lại từ Scene Browser), thời lượng TTS, trạng thái `fit` (✅ / ⚠️ short / ✂️ trimmed).
    - Mỗi dòng có nút: ▶︎ nghe TTS, ▶︎ xem đoạn ghép, 🔁 tạo lại TTS, ✨ "Nhờ Claude viết lại câu này" (gọi `claude -p` cho riêng câu đó, kèm ngữ cảnh 3 câu trước và sau).
    - Tổng thời lượng hiện tại so với mục tiêu.
    - Lưu thì ghi `script.yaml` và đánh dấu `tts`, `assemble` thành `stale`.
+   - Nút **"Nhận xét & viết lại"**: người dùng viết nhận xét (có gợi ý mẫu), Claude viết lại cả kịch bản (`script-revise`, mục 4.5). Tắt khi còn sửa chưa lưu hoặc đang có job.
 
 5. **Preview & Export**
    - AVPlayer phát `recap_preview.mp4`. Danh sách dòng kịch bản bên cạnh, tự highlight theo thời gian phát. Bấm vào dòng thì nhảy tới đoạn đó.
@@ -516,6 +571,8 @@ Schema:
 | Phim có nhiều track audio | Dùng track mặc định, cho chọn trong settings |
 | OCR (Vision) không đọc được khung / thiếu pyobjc | Khung đó coi như không có chữ, log `warning`; `inspect` vẫn xong (vẫn tìm logo tĩnh và viền đen) |
 | `cropdetect` lỗi / không có ffmpeg | Bỏ qua phần viền đen, log `warning` |
+| Đã tìm thấy nhân vật nhưng chưa đặt tên | `describe` (và `script`) báo `characters_unnamed`; banner có nút "Đặt tên nhân vật" mở tab Nhân vật |
+| Chưa tải được model mặt / OpenCV lỗi | `characters_failed` (retryable); pipeline vẫn chạy được nếu bỏ qua stage này |
 | Mọi beat đều bị bỏ | `script` báo `input_missing`, nói số beat do `inspect` bỏ và chỉ tới nút "Vẫn dùng cảnh này" |
 | RAM | Không chạy Whisper và Ollama VL cùng lúc. Sau stage `describe` thì gọi unload model Ollama (`keep_alive: 0`) |
 
@@ -540,7 +597,7 @@ Schema:
 | **M9** | Preview & Export: player + highlight dòng theo thời gian phát | Bấm vào dòng thì nhảy đúng đoạn |
 | **M10** | Test với 1 phim đầy đủ ~2 tiếng, tối ưu thời gian và RAM | Hoàn thành không lỗi. Ghi lại thời gian từng stage trong `project.json` |
 
-| **M11** | Cải tiến theo góp ý chuyên gia, làm theo thứ tự đã duyệt: (1) sửa nhanh: clip ≤ 8s, original ≤ 10s, tắt tiếng phim dưới lời kể, −14 LUFS, luôn 1080p 10 Mbps + lanczos/sharpen, banner mỏng tùy chỉnh bằng `brand.json`, prompt không tả quần áo; (4) stage `inspect`: OCR, watermark, quảng cáo, credit, viền đen; (2) QA tự động có ngưỡng chặn; (3) hồ sơ phim + kịch bản kể chuyện trước; (5) sửa clip và giọng đọc (150–170 từ/phút, ngắt nghỉ, từ điển phát âm). Sau đó: gom mặt nhân vật, kiểm tra sự thật bằng VL, Real-ESRGAN, khung 9:16 | Mỗi mục chạy thử trên video mẫu và báo cáo số đo. **Đã xong (1) và (4).** Còn lại (2), (3), (5): hiện giọng đọc khoảng 273 từ/phút |
+| **M11** | Cải tiến theo góp ý chuyên gia, làm theo thứ tự đã duyệt: (1) sửa nhanh: clip ≤ 8s, original ≤ 10s, tắt tiếng phim dưới lời kể, −14 LUFS, luôn 1080p 10 Mbps + lanczos/sharpen, banner mỏng tùy chỉnh bằng `brand.json`, prompt không tả quần áo; (4) stage `inspect`: OCR, watermark, quảng cáo, credit, viền đen; (2) QA tự động có ngưỡng chặn; (3) hồ sơ phim + kịch bản kể chuyện trước; (5) sửa clip và giọng đọc (150–170 từ/phút, ngắt nghỉ, từ điển phát âm). Sau đó: gom mặt nhân vật, kiểm tra sự thật bằng VL, Real-ESRGAN, khung 9:16 | Mỗi mục chạy thử trên video mẫu và báo cáo số đo. **Đã xong (1) và (4)**, thêm: gom mặt + đặt tên nhân vật (stage `characters`, tab Nhân vật), viết lại kịch bản theo nhận xét. Còn lại (2), (3), (5): hiện giọng đọc khoảng 273 từ/phút |
 
 Yêu cầu chung: có unit test cho phần căn khớp (`assemble`) và validate script; dùng type hint đầy đủ; code Swift tách View, ViewModel và Service.
 

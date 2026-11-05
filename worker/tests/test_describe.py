@@ -183,3 +183,64 @@ def test_missing_keyframe_fails_clearly(tmp_path: Path) -> None:
 
     assert not ok
     assert next(e for e in events if e["type"] == "error")["code"] == "input_missing"
+
+
+# ---- who is on screen (named in the "Nhân vật" tab) ---------------------------
+
+
+def test_unnamed_characters_stop_describe_before_the_long_work(tmp_path: Path) -> None:
+    from tests.test_script_stage import write_characters
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    fake = FakeDescriber()
+
+    ok, events = run(project_dir, fake)
+
+    assert not ok and fake.calls == []
+    assert next(e for e in events if e["type"] == "error")["code"] == "characters_unnamed"
+
+
+def test_named_people_are_given_to_the_describer_to_trust_over_its_guess(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+    from tests.test_script_stage import write_characters
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)  # C01 in every beat, C02 only in B0003
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cha", "C02": "Hiro"}, genders={"C01": "nữ"}))
+    fake = FakeDescriber()
+
+    assert run(project_dir, fake)[0]
+    prompts = dict(fake.calls)
+    assert "Cha (nữ)" in prompts["B0001"] and "Hiro" not in prompts["B0001"]
+    assert "Cha (nữ), Hiro" in prompts["B0003"]
+
+
+def test_without_names_the_prompt_and_cache_stay_as_before(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+    from tests.test_script_stage import write_characters
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True))  # "skip": no names
+    fake = FakeDescriber()
+
+    assert run(project_dir, fake)[0]
+    assert dict(fake.calls)["B0001"] == build_prompt(BEATS[0]["dialogue"])
+
+
+def test_renaming_redescribes_only_the_scenes_that_person_is_in(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+    from tests.test_script_stage import write_characters
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cha", "C02": "Hiro"}))
+    assert run(project_dir, FakeDescriber())[0]
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cha", "C02": "Bat"}))
+    fake = FakeDescriber()
+
+    ok, events = run(project_dir, fake)
+
+    assert ok and events[-1]["skipped"] is False
+    assert [stem for stem, _ in fake.calls] == ["B0003"]

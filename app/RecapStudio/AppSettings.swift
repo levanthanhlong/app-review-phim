@@ -16,6 +16,7 @@ final class AppSettings {
         static let tools = "toolPath"
         static let music = "musicRoot"
         static let brand = "brandFolder"
+        static let labels = "characterLabels"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -32,6 +33,8 @@ final class AppSettings {
     var musicRoot: String { didSet { defaults.set(musicRoot, forKey: Key.music) } }
     /// Channel images: "Banner dưới video…" and "Ảnh đại diện…" (png).
     var brandFolder: String { didSet { defaults.set(brandFolder, forKey: Key.brand) } }
+    /// Names that fit anyone ("cô gái", "bác sĩ"...), offered in the "Nhân vật" tab; the user edits the list.
+    var characterLabels: [String] { didSet { defaults.set(characterLabels, forKey: Key.labels) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -43,6 +46,7 @@ final class AppSettings {
         // next to worker/ in the repo, so it follows wherever the repo lives
         musicRoot = defaults.string(forKey: Key.music) ?? "\((worker as NSString).deletingLastPathComponent)/music"
         brandFolder = defaults.string(forKey: Key.brand) ?? "\((worker as NSString).deletingLastPathComponent)/img"
+        characterLabels = defaults.stringArray(forKey: Key.labels) ?? CharacterLabels.defaults
     }
 
     var projectsRootURL: URL { URL(filePath: projectsRoot, directoryHint: .isDirectory) }

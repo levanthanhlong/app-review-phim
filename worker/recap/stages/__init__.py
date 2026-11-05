@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from recap.runner import Stage
 from recap.stages.assemble import AssembleStage
+from recap.stages.characters import CharactersStage
 from recap.stages.describe import DescribeStage
 from recap.stages.export import ExportStage
 from recap.stages.ingest import IngestStage
@@ -21,6 +22,7 @@ STAGES: dict[str, Stage] = {
         TranscribeStage(),
         ScenesStage(),
         InspectStage(),
+        CharactersStage(),
         DescribeStage(),
         ScriptStage(),
         TTSStage(),

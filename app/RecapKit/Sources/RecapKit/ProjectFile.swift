@@ -2,7 +2,7 @@ import Foundation
 
 /// The pipeline stages, in order (worker `STAGE_NAMES`).
 public enum StageName: String, CaseIterable, Sendable, Codable, Identifiable {
-    case ingest, transcribe, scenes, inspect, describe, script, tts, music, assemble, export
+    case ingest, transcribe, scenes, inspect, characters, describe, script, tts, music, assemble, export
 
     public var id: String { rawValue }
 
@@ -12,6 +12,7 @@ public enum StageName: String, CaseIterable, Sendable, Codable, Identifiable {
         case .transcribe: "Nhận dạng lời thoại"
         case .scenes: "Chia cảnh"
         case .inspect: "Kiểm tra nguồn"
+        case .characters: "Nhân vật"
         case .describe: "Mô tả cảnh"
         case .script: "Viết kịch bản"
         case .tts: "Tạo giọng đọc"
@@ -50,6 +51,8 @@ public struct StageState: Sendable, Codable, Equatable {
 public struct ProjectSettings: Sendable, Codable, Equatable {
     public let targetRatio: Double?
     public let narrationStyle: String?
+    public let channelName: String?  // the channel the narrator speaks for
+    public let narrator: String?  // what the narrator calls themself ("Mắm")
     public let ttsEngine: String?
     public let voice: String?
     public let ttsRate: String?

@@ -59,9 +59,9 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGINT, handler)
 
 
-# Stages the next one can do without: `inspect` only adds skips and cleanup (and projects made
-# before it existed have it pending), so `describe` needs `scenes`.
-OPTIONAL_STAGES = frozenset({"inspect"})
+# Stages the next one can do without: `inspect` only adds skips and cleanup, `characters` only
+# names (and projects made before them have them pending), so `describe` needs `scenes`.
+OPTIONAL_STAGES = frozenset({"inspect", "characters"})
 
 
 def check_dependency(project: Project, name: str) -> None:

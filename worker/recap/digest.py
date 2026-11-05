@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from recap.models import DescribedBeat
 from recap.script_model import format_tc
@@ -10,16 +10,22 @@ from recap.script_model import format_tc
 SECONDS_PER_MINUTE = 60
 NO_DIALOGUE = "(không có)"
 IMPORTANT_FLAG = "⭐ QUAN TRỌNG"
+CAST_LABEL = "Nhân vật"
 
 
-def digest_line(beat: DescribedBeat, important: bool = False) -> str:
+def digest_line(beat: DescribedBeat, important: bool = False, names: Sequence[str] = ()) -> str:
     dialogue = f'"{beat.dialogue.strip()}"' if beat.dialogue.strip() else NO_DIALOGUE
     flag = f" | {IMPORTANT_FLAG}" if important else ""
-    return f"[{beat.id} {format_tc(beat.start)}-{format_tc(beat.end)}] Hình: {beat.desc} | Thoại: {dialogue}{flag}"
+    people = f" | {CAST_LABEL}: {', '.join(names)}" if names else ""
+    return f"[{beat.id} {format_tc(beat.start)}-{format_tc(beat.end)}] Hình: {beat.desc} | Thoại: {dialogue}{flag}{people}"
 
 
-def digest_text(beats: Sequence[DescribedBeat], starred: frozenset[str] = frozenset()) -> str:
-    return "\n".join(digest_line(b, b.id in starred) for b in beats)
+def digest_text(
+    beats: Sequence[DescribedBeat], starred: frozenset[str] = frozenset(), cast: Mapping[str, Sequence[str]] | None = None
+) -> str:  # fmt: skip
+    """One line per beat; `cast` adds who is on screen (named in the "Nhân vật" tab)."""
+    cast = cast or {}
+    return "\n".join(digest_line(b, b.id in starred, cast.get(b.id, ())) for b in beats)
 
 
 def split_parts(beats: Sequence[DescribedBeat], part_size_min: float) -> list[list[DescribedBeat]]:

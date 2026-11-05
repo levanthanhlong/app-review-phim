@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,8 @@ import yaml
 
 from recap import config
 from recap.beat_marks import apply_marks, auto_skips, effective_marks, marks_signature
-from recap.digest import IMPORTANT_FLAG, digest_text, split_parts
+from recap.characters import UNNAMED, Cast, cast_signature, project_cast
+from recap.digest import CAST_LABEL, IMPORTANT_FLAG, digest_text, split_parts
 from recap.llm import LLMError, LLMProvider, get_provider
 from recap.models import DESCRIBED_ADAPTER, DescribedBeat, Project, Settings
 from recap.runner import StageContext, StageFailure
@@ -41,11 +42,33 @@ STYLES = {
     "kich_tinh": "kịch tính, lôi cuốn",
     "nghiem_tuc": "nghiêm túc, mạch lạc",
     "hai_mia_mai": "hài hước, mỉa mai",
+    "doi_thuong_hai": "đời thường, hài hước, lém lỉnh như một người bạn mê phim đang kể lại",
 }
+# Where a part sits in the video: the whole-video outline (hook ... call to action) is split over the parts.
+POSITIONS = {
+    "only": "Phim chỉ có một phần này: kể trọn khung (cẩm nang mục 2): hook, mở truyện, leo thang, cao trào, "
+            "cái kết và giải thích, rồi nhận xét và kêu gọi.",
+    "first": "Đây là phần đầu: hook, mở truyện (bối cảnh, nhân vật, điềm báo) rồi bắt đầu leo thang. "
+             "Chưa kết phim; kết phần bằng một câu nhử sang phần sau.",
+    "middle": "Đây là phần giữa: mở bằng một câu nối với phần trước, tiếp tục leo thang, "
+              "kết phần bằng một câu nhử sang phần sau. Không hook lại, không kết phim.",
+    "last": "Đây là phần cuối: mở bằng một câu nối với phần trước, rồi cao trào, cái kết và giải thích "
+            "(đóng mọi vòng đã mở), rồi nhận xét và kêu gọi.",
+}  # fmt: skip
 # Added to a part's prompt only when it has beats starred in the Scene Browser.
 STAR_RULE = (
     f"\n\nBeat có dấu \"{IMPORTANT_FLAG}\" là cảnh người làm video muốn giữ: "
     "hãy đưa các beat đó vào kịch bản (lời kể hoặc original)."
+)
+
+# Added when the user named the people found by the `characters` stage.
+CAST_RULE = (
+    "\n\nNhân vật trong phim (người làm video đã đặt tên, ai xuất hiện nhiều nhất đứng trước): {names}. "
+    f"Dòng \"{CAST_LABEL}:\" của một beat là những người có mặt trong cảnh đó. "
+    "Gọi đúng tên này, giữ nguyên cách gọi suốt kịch bản và không tự đặt tên khác cho họ. "
+    "Chữ (nam) hay (nữ) sau tên chỉ cho biết giới tính để xưng hô cho đúng (anh, cô, ông, bà…), không đọc ra. "
+    f"Phần \"Hình\" do máy tự mô tả nên có thể nhầm người hoặc nhầm giới tính: khi nó trái với dòng "
+    f"\"{CAST_LABEL}:\" thì tin dòng \"{CAST_LABEL}:\"."
 )
 
 ProviderFactory = Callable[[Settings], LLMProvider]
@@ -55,6 +78,22 @@ SpeechRate = Callable[[Settings], float]
 def format_rate(rate: float) -> str:
     """Words/second for people and prompts: one decimal, no trailing `.0` (4.5, 3)."""
     return f"{rate:.1f}".removesuffix(".0")
+
+
+def _position(index: int, total: int) -> str:
+    if total == 1:
+        return POSITIONS["only"]
+    return POSITIONS["first" if index == 1 else "last" if index == total else "middle"]
+
+
+def voice_values(settings: Settings) -> dict[str, str]:
+    """How the narrator speaks, shared by every script prompt (the stage, revise, rewrite one line)."""
+    return {
+        "style": STYLES.get(settings.narration_style, settings.narration_style),
+        "channel": settings.channel_name.strip() or "kênh",
+        "narrator": settings.narrator.strip() or "mình",
+        "guide": _guide(),
+    }
 
 
 def _template() -> str:
@@ -91,11 +130,41 @@ def _dump_yaml(data: Any) -> str:
     return yaml.dump(data, Dumper=_ScriptDumper, allow_unicode=True, sort_keys=False, width=1000)
 
 
-def _part_targets(parts: list[list[DescribedBeat]], total_target: float) -> list[float]:
+def part_targets(parts: list[list[DescribedBeat]], total_target: float) -> list[float]:
     """Split the total target between parts in proportion to their running time."""
     lengths = [p[-1].end - p[0].start for p in parts]
     whole = sum(lengths) or 1.0
     return [total_target * length / whole for length in lengths]
+
+
+def part_prompt(
+    settings: Settings, title: str, index: int, total: int, previous_summary: str, target: float, speed: float,
+    has_starred: bool = False, cast: Sequence[str] = (),
+) -> str:  # fmt: skip
+    """The instructions for writing one part (its beats go on stdin)."""
+    prompt = _fill(_template(), {
+        **voice_values(settings),
+        "position": _position(index, total),
+        "title": title,
+        "part": str(index),
+        "total_parts": str(total),
+        "previous_summary": previous_summary,
+        "target_sec": f"{target:.0f}",
+        "words_per_sec": format_rate(speed),
+    })  # fmt: skip
+    if has_starred:
+        prompt += STAR_RULE
+    return prompt + CAST_RULE.replace("{names}", ", ".join(cast)) if cast else prompt
+
+
+def script_text(title: str, target_sec: float, speed: float, items: list[Item]) -> str:
+    """script.yaml with its header; line ids renumbered (every part's answer starts at L0001)."""
+    return _dump_yaml({
+        "title": title,
+        "target_duration_sec": target_sec,
+        "words_per_sec": round(speed, 2),
+        "items": [{"id": f"L{n:04d}", **{k: v for k, v in item.items() if k != "id"}} for n, item in enumerate(items, start=1)],
+    })  # fmt: skip
 
 
 class ScriptStage:
@@ -131,19 +200,25 @@ class ScriptStage:
         duration = project.media.duration if project.media else 0.0
         prompt_hash = hashlib.sha256((_template() + _guide()).encode()).hexdigest()[:12]
         speed = f"{self._fingerprint_speed(project_dir, s):.2f}"  # a much faster/slower voice needs other text
-        fields = [s.target_ratio, s.narration_style, s.llm_provider, s.claude_model, s.part_size_min, duration, speed]
+        fields = [s.target_ratio, s.narration_style, s.llm_provider, s.claude_model, s.part_size_min, duration, speed,
+                  s.channel_name, s.narrator]  # fmt: skip
         marks = marks_signature(project_dir)  # only when the user marked beats
+        cast = cast_signature(project_cast(project_dir).by_beat)  # only when the user named people
         extras = [f"beat_marks:{marks}"] if marks else []
+        extras += [f"cast:{cast}"] if cast else []
         return "|".join([config.file_signature(project_dir / DESCRIBED), prompt_hash, *map(str, fields), *extras])
 
     def run(self, ctx: StageContext) -> Project:
-        beats, starred = self._load_beats(ctx)
+        cast = project_cast(ctx.project_dir)
+        if cast.needs_naming:
+            raise StageFailure("characters_unnamed", UNNAMED, retryable=True)
+        beats, starred = self.load_beats(ctx)
         settings = ctx.project.settings
         total_duration = ctx.project.media.duration if ctx.project.media else beats[-1].end
         total_target = round(total_duration * settings.target_ratio)
         speed = self._words_per_sec(settings)
         parts = split_parts(beats, settings.part_size_min)
-        targets = _part_targets(parts, total_target)
+        targets = part_targets(parts, total_target)
         ctx.path(DIGEST_DIR).mkdir(parents=True, exist_ok=True)
         ctx.path(PARTS_DIR).mkdir(parents=True, exist_ok=True)
         if ctx.force:  # write every part anew; a forced run that stops resumes from the new parts
@@ -158,21 +233,11 @@ class ScriptStage:
         summary = FIRST_PART_SUMMARY
         for index, (part, target) in enumerate(zip(parts, targets), start=1):
             ctx.emitter.progress(self.name, index - 1, len(parts), f"Phần {index}/{len(parts)}")
-            items, summary = self._part(ctx, provider, part, index, len(parts), target, summary, speed, starred)
+            items, summary = self._part(ctx, provider, part, index, len(parts), target, summary, speed, starred, cast)
             all_items.extend(items)
 
-        script = {
-            "title": ctx.project.title,
-            "target_duration_sec": total_target,
-            "words_per_sec": round(speed, 2),
-            # Renumber globally: every part's answer starts its own ids at L0001.
-            "items": [
-                {"id": f"L{n:04d}", **{k: v for k, v in item.items() if k != "id"}}
-                for n, item in enumerate(all_items, start=1)
-            ],
-        }
-        text = _dump_yaml(script)
-        self._back_up_previous(ctx, text)
+        text = script_text(ctx.project.title, total_target, speed, all_items)
+        self.back_up_previous(ctx, text)
         config.write_text_atomic(ctx.path(SCRIPT), text)
         ctx.emitter.progress(self.name, len(parts), len(parts), "Xong")
         ctx.emitter.log("info", f"{len(parts)} phần, {len(all_items)} dòng kịch bản, mục tiêu {total_target}s")
@@ -180,7 +245,7 @@ class ScriptStage:
         return ctx.project
 
     @staticmethod
-    def _back_up_previous(ctx: StageContext, new_text: str) -> None:
+    def back_up_previous(ctx: StageContext, new_text: str) -> None:
         """Keep the script being replaced (it may hold edits from the Script Editor)."""
         try:
             old_text = ctx.path(SCRIPT).read_text(encoding="utf-8")
@@ -194,7 +259,7 @@ class ScriptStage:
         config.write_text_atomic(ctx.path(backup), old_text)
         ctx.emitter.log("warning", f"Kịch bản cũ (kể cả phần đã sửa tay) được lưu lại ở {backup}")
 
-    def _load_beats(self, ctx: StageContext) -> tuple[list[DescribedBeat], frozenset[str]]:
+    def load_beats(self, ctx: StageContext) -> tuple[list[DescribedBeat], frozenset[str]]:
         """The described beats minus the skipped ones (marked, or flagged by `inspect`), and the starred ids."""
         path = ctx.path(DESCRIBED)
         if not path.is_file():
@@ -220,29 +285,20 @@ class ScriptStage:
         previous_summary: str,
         speed: float,
         starred: frozenset[str] = frozenset(),
+        cast: Cast = Cast(),
     ) -> tuple[list[Item], str]:
-        digest = digest_text(beats, starred)
+        digest = digest_text(beats, starred, cast.by_beat)
         config.write_text_atomic(ctx.path(f"{DIGEST_DIR}/part_{index:02d}.txt"), digest)
         settings = ctx.project.settings
-        prompt = _fill(_template(), {
-            "style": STYLES.get(settings.narration_style, settings.narration_style),
-            "title": ctx.project.title,
-            "part": str(index),
-            "total_parts": str(total),
-            "previous_summary": previous_summary,
-            "target_sec": f"{target:.0f}",
-            "words_per_sec": format_rate(speed),
-            "guide": _guide(),
-        })  # fmt: skip
-        if any(b.id in starred for b in beats):
-            prompt += STAR_RULE
+        prompt = part_prompt(settings, ctx.project.title, index, total, previous_summary, target, speed,
+                             has_starred=any(b.id in starred for b in beats), cast=cast.names)  # fmt: skip
         key = hashlib.sha256(f"{settings.claude_model}\n{prompt}\n{digest}".encode()).hexdigest()[:16]
         part_file = ctx.path(f"{PARTS_DIR}/part_{index:02d}.yaml")
         cached = self._load_part(part_file, key)
         if cached is not None:
             ctx.emitter.log("info", f"Phần {index}/{total}: dùng kết quả đã có")
             return cached
-        items, summary = self._ask(ctx, provider, prompt, digest, {b.id: b for b in beats}, target, index, speed)
+        items, summary = self.ask(ctx, provider, prompt, digest, {b.id: b for b in beats}, target, index, speed)
         config.write_text_atomic(part_file, _dump_yaml({"key": key, "summary": summary, "items": items}))
         return items, summary
 
@@ -256,7 +312,7 @@ class ScriptStage:
             return None
         return data["items"], data.get("summary", "")
 
-    def _ask(
+    def ask(
         self,
         ctx: StageContext,
         provider: LLMProvider,

@@ -73,7 +73,7 @@ def test_changing_voice_marks_tts_and_everything_after_stale(tmp_path: Path) -> 
 
     assert settings.voice == "Đức Trí"
     assert stale == ["tts", "music", "assemble", "export"]
-    assert statuses(project_dir) == {"ingest": "done", "transcribe": "done", "scenes": "done", "inspect": "done", "describe": "done",
+    assert statuses(project_dir) == {"ingest": "done", "transcribe": "done", "scenes": "done", "inspect": "done", "characters": "done", "describe": "done",
                                      "script": "done", "tts": "stale", "music": "stale", "assemble": "stale",
                                      "export": "stale"}  # fmt: skip
 
@@ -158,3 +158,23 @@ def test_cli_normalizes_decomposed_unicode_arguments(tmp_path: Path) -> None:
     project = config.load_project(project_dir)
     assert project.settings.voice == "Đức Trí" and project.title == "Cóc Kiện Trời"
     assert unicodedata.is_normalized("NFC", project.title)
+
+
+class SourceGoneStage(FakeStage):
+    """Like `ingest` once the film was deleted: its fingerprint cannot be computed."""
+
+    def fingerprint(self, project_dir: Path, project) -> str:  # noqa: ANN001
+        raise StageFailure("source_missing", "File phim gốc không còn tồn tại")
+
+
+def test_a_stage_whose_fingerprint_cannot_be_computed_is_left_as_it_is(tmp_path: Path) -> None:
+    # Arrange: the film was deleted after ingest (its outputs are still there)
+    project_dir = done_project(tmp_path)
+    stages = {**STAGES, "ingest": SourceGoneStage("ingest", "audio_track")}
+
+    # Act
+    _, stale = apply_settings(project_dir, {"voice": "Đức Trí"}, stages)
+
+    # Assert: the change still goes through; ingest is not blamed for the missing film
+    assert stale == ["tts", "music", "assemble", "export"]
+    assert statuses(project_dir)["ingest"] == "done"

@@ -14,8 +14,11 @@ Commands:
   script-save --project DIR --file EDIT.json        validate and save edited lines ({"items": [...]})
   script-rewrite --project DIR --line L0001 [--hint H]
                                                     ask Claude for a better version of one line
+  script-revise --project DIR --feedback TEXT       Claude rewrites the whole script following the notes
   beat-mark --project DIR --beat B0001 --mark star|skip|keep|none
                                                     mark a beat for the script stage
+  characters-save --project DIR --file NAMING.json  save the names chosen for the characters
+                                                    ({"names": {...}, "merged": {...}, "ignored": [...]} or {"skip": true})
   <stage>  --project DIR [--force]                  run one stage
   run      --project DIR [--from S] [--to S] [--force]
 """
@@ -31,8 +34,12 @@ from pathlib import Path
 
 from recap import config, doctor, music_edit, script_edit, settings_update, voices
 from recap.beat_marks import auto_skips, load_marks
+from recap.character_edit import save_naming
+from recap.characters import load_choices
+from recap.script_revise import revise_script
 from recap.events import Emitter, take_protocol_stdout
 from recap.models import STAGE_NAMES
+from recap.project_rename import rename_project
 from recap.runner import Cancelled, install_signal_handlers, run_stage
 from recap.stages import STAGES
 from recap.tts_engines import TTSError, rate_factor
@@ -50,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--title", required=True)
     new.add_argument("--source", required=True, type=Path)
     new.add_argument("--root", type=Path, default=config.DEFAULT_PROJECTS_ROOT)
+
+    rename = sub.add_parser("project-rename", help="đổi tên dự án (và thư mục)")
+    rename.add_argument("--project", required=True, type=Path)
+    rename.add_argument("--title", required=True)
 
     doc = sub.add_parser("doctor", help="kiểm tra môi trường")
     doc.add_argument("--root", type=Path, default=config.DEFAULT_PROJECTS_ROOT)
@@ -92,6 +103,13 @@ def build_parser() -> argparse.ArgumentParser:
     rewrite.add_argument("--project", required=True, type=Path)
     rewrite.add_argument("--line", required=True)
     rewrite.add_argument("--hint", default="", help="gợi ý thêm cho Claude")
+    revise = sub.add_parser("script-revise", help="nhờ Claude viết lại cả kịch bản theo nhận xét")
+    revise.add_argument("--project", required=True, type=Path)
+    revise.add_argument("--feedback", required=True, help="nhận xét về kịch bản hiện tại")
+
+    naming = sub.add_parser("characters-save", help="lưu tên đã chọn cho các nhân vật")
+    naming.add_argument("--project", required=True, type=Path)
+    naming.add_argument("--file", required=True, type=Path)
 
     mark = sub.add_parser("beat-mark", help="đánh dấu beat quan trọng / bỏ qua")
     mark.add_argument("--project", required=True, type=Path)
@@ -118,6 +136,19 @@ def cmd_new(args: argparse.Namespace, emitter: Emitter) -> int:
         emitter.error(None, exc.code, exc.message, retryable=False)
         return EXIT_FAILED
     emitter.result("new", {"project": str(project_dir)})
+    return EXIT_OK
+
+
+def cmd_rename(args: argparse.Namespace, emitter: Emitter) -> int:
+    try:
+        project_dir = rename_project(args.project, args.title)
+    except config.ProjectError as exc:
+        emitter.error(None, exc.code, exc.message, retryable=False)
+        return EXIT_FAILED
+    except OSError as exc:
+        emitter.error(None, "rename_failed", f"Không đổi tên được thư mục: {exc}", retryable=True)
+        return EXIT_FAILED
+    emitter.result("project-rename", {"project": str(project_dir)})
     return EXIT_OK
 
 
@@ -194,12 +225,26 @@ def _edit_file_items(path: Path) -> list:
     return items if isinstance(items, list) else []
 
 
+def _naming_file(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise script_edit.ScriptEditError("naming_invalid", f"Không đọc được {path.name}: {exc}") from exc
+
+
 def cmd_script(args: argparse.Namespace, emitter: Emitter) -> int:
     try:
-        if args.command == "script-show":
+        if args.command == "characters-save":
+            stale = save_naming(args.project, _naming_file(args.file), STAGES)
+            choices = load_choices(args.project)
+            data = {"stale": stale, "choices": {"confirmed": choices.confirmed, "names": dict(choices.names),
+                                                "merged": dict(choices.merged), "ignored": sorted(choices.ignored)}}  # fmt: skip
+        elif args.command == "script-show":
             data = script_edit.show_script(args.project)
         elif args.command == "script-save":
             data = {"stale": script_edit.save_script(args.project, _edit_file_items(args.file), STAGES)}
+        elif args.command == "script-revise":
+            data = {"stale": revise_script(args.project, args.feedback, STAGES, emitter)}
         elif args.command == "script-rewrite":
             data = {"line": args.line, "text": script_edit.rewrite_line(args.project, args.line, hint=args.hint)}
         else:
@@ -233,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "new":
             return cmd_new(args, emitter)
+        if args.command == "project-rename":
+            return cmd_rename(args, emitter)
         if args.command == "doctor":
             return cmd_doctor(args, emitter)
         if args.command == "run":
@@ -245,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_voice_preview(args, emitter)
         if args.command in ("music-choose", "music-edit"):
             return cmd_music(args, emitter)
-        if args.command in ("script-show", "script-save", "script-rewrite", "beat-mark"):
+        if args.command in ("script-show", "script-save", "script-rewrite", "script-revise", "beat-mark", "characters-save"):
             return cmd_script(args, emitter)
         ok = run_stage(args.project, args.command, STAGES, emitter, force=args.force)
         return EXIT_OK if ok else EXIT_FAILED

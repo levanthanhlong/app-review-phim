@@ -257,3 +257,12 @@ def test_cli_save_reports_invalid_script(tmp_path: Path) -> None:
 
     assert code == 1
     assert events[-1]["type"] == "error" and events[-1]["code"] == "script_invalid"
+
+
+def test_rewrite_follows_the_same_guide_and_channel_voice(tmp_path: Path) -> None:
+    project_dir = edit_project(tmp_path)
+    llm = FakeLLM(["Một câu mới cho dòng đầu tiên của phim này."])
+
+    rewrite_line(project_dir, "L0001", provider_factory=lambda s: llm, speech_rate=lambda s: 3.0)
+
+    assert "Cẩm nang lời kể" in llm.prompts[0] and "Mắm" in llm.prompts[0]

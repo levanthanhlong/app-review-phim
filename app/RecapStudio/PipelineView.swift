@@ -2,9 +2,9 @@ import AppKit
 import RecapKit
 import SwiftUI
 
-/// The project screen's tabs (spec §7.2: pipeline, scene browser, script editor, preview & export).
+/// The project screen's tabs (spec §7.2: pipeline, scene browser, characters, script editor, preview & export).
 enum ProjectTab: String, CaseIterable, Identifiable {
-    case pipeline, scenes, script, preview
+    case pipeline, scenes, characters, script, preview
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum ProjectTab: String, CaseIterable, Identifiable {
         switch self {
         case .pipeline: "Các bước"
         case .scenes: "Cảnh"
+        case .characters: "Nhân vật"
         case .script: "Kịch bản"
         case .preview: "Xem trước"
         }
@@ -39,12 +40,13 @@ struct ProjectDetailView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 520)
+            .frame(maxWidth: 620)
             .padding(.vertical, 10)
             Divider()
             switch tab {
             case .pipeline: pipeline
             case .scenes: SceneBrowserView(project: project)
+            case .characters: CharactersView(project: project)
             case .script:
                 ScriptEditorView(project: project) { line in
                     previewLine = line
@@ -67,7 +69,7 @@ struct ProjectDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 ProjectHeader(project: project, showSettings: $showSettings)
                 if let error = state.lastError, !isBusy {
-                    ErrorBanner(error: error, retry: retry(error))
+                    ErrorBanner(error: error, retry: retry(error), fix: fix(error))
                 }
                 StageList(project: project)
                 if project.file.settings.musicSource == "ai" {
@@ -81,8 +83,16 @@ struct ProjectDetailView: View {
     }
 
     private func retry(_ error: StageFailureInfo) -> (() -> Void)? {
-        guard error.retryable, let stage = error.stage else { return nil }
+        guard error.retryable, let stage = error.stage, error.code != Self.unnamedCode else { return nil }
         return { model.runFrom(stage, project) }
+    }
+
+    static let unnamedCode = "characters_unnamed"
+
+    /// The way out of an error that needs the user, not a retry: naming the characters.
+    private func fix(_ error: StageFailureInfo) -> ErrorBanner.Fix? {
+        guard error.code == Self.unnamedCode else { return nil }
+        return ErrorBanner.Fix(title: "Đặt tên nhân vật", systemImage: "person.2") { tab = .characters }
     }
 }
 
@@ -348,8 +358,15 @@ struct StepBadge: View {
 }
 
 struct ErrorBanner: View {
+    struct Fix {
+        let title: String
+        let systemImage: String
+        let action: () -> Void
+    }
+
     let error: StageFailureInfo
     let retry: (() -> Void)?
+    var fix: Fix?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -359,6 +376,9 @@ struct ErrorBanner: View {
                 Text(error.message).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
+            if let fix {
+                Button(fix.title, systemImage: fix.systemImage, action: fix.action).buttonStyle(.borderedProminent)
+            }
             if let retry {
                 Button("Thử lại", systemImage: "arrow.clockwise", action: retry).buttonStyle(.borderedProminent).tint(.red)
             }

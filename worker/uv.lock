@@ -3277,6 +3277,8 @@ dependencies = [
     { name = "pyobjc-framework-vision" },
     { name = "pyyaml" },
     { name = "scenedetect" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "vieneu" },
 ]
 
@@ -3298,6 +3300,7 @@ requires-dist = [
     { name = "pyobjc-framework-vision", specifier = ">=10" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scenedetect", extras = ["opencv"], specifier = ">=0.6.4" },
+    { name = "scipy", specifier = ">=1.11" },
     { name = "vieneu", specifier = ">=3.8,<4" },
 ]
 

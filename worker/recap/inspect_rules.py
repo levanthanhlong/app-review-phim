@@ -32,14 +32,12 @@ REFINE_PAD = 0.06  # static pixels this close to a watermark's text belong to it
 REGION_PAD = 0.01
 CORNER = 0.3  # corner windows searched for logos without text
 MIN_LOGO_SHARE = 0.002  # of the frame's pixels: smaller static specks are noise
-INTRO_SEC, OUTRO_SEC = 90.0, 180.0  # title cards are looked for this close to the start / end
 HEAD_SHARE, TAIL_SHARE = 0.15, 0.25  # flags this close to the start / end skip from the start / to the end
-MIN_TITLE_BOXES = 2
 MIN_FLAG_RUN = 2  # a flag counts only with this many flags (itself included) within...
 MAX_FLAG_GAP_SEC = 3.0  # ...this many seconds of it
 
-Kind = Literal["ad", "credit", "bts", "disclaimer", "title"]
-EDGE_KINDS = ("ad", "credit", "bts", "disclaimer", "title")
+Kind = Literal["ad", "credit", "bts", "disclaimer"]
+EDGE_KINDS = ("ad", "credit", "bts", "disclaimer")
 
 KEYWORDS: dict[str, tuple[str, ...]] = {
     "ad": ("tài trợ", "quảng cáo", "khuyến mãi", "giảm giá", "cá cược", "nhà cái", "casino", "đặt cược",
@@ -181,14 +179,91 @@ def _overlay(group: set[tuple[int, int]], frames: Sequence[FrameText]) -> Overla
 
 
 def find_overlays(frames: Sequence[FrameText]) -> list[Overlay]:
-    """Watermarks and burned-in subtitles: text in the same place in at least PERSIST_SHARE of the frames."""
+    """Watermarks and burned-in subtitles: text in the same place in at least PERSIST_SHARE of the
+    frames, plus subtitle bands (subtitles show only while someone talks, often less than that)."""
     if not frames:
         return []
     counts: Counter[tuple[int, int]] = Counter()
     for frame in frames:
         counts.update(set().union(*(_cells(b) for b in _confident(frame.boxes))) if frame.boxes else set())
     persistent = {cell for cell, n in counts.items() if n >= PERSIST_SHARE * len(frames)}
-    return [_overlay(group, frames) for group in _components(persistent)]
+    overlays = [_overlay(group, frames) for group in _components(persistent)]
+    subtitles = [o.region for o in overlays if o.kind == "subtitles"]
+    return overlays + [band for band in subtitle_bands(frames) if not any(band.region.overlaps(r) for r in subtitles)]
+
+
+SUB_SHARE = 0.1  # a subtitle band has text in at least this share of the frames...
+SUB_DISTINCT = 0.3  # ...saying something new at least this often (a centred logo always says the same)
+SUB_MIN_LINES = 10
+SUB_CENTRE = 0.2  # subtitle lines are centred: their middle within this of the frame's middle
+SUB_MAX_H = 0.12  # one or two lines of text, not a title
+SUB_BIN = 0.02  # height of the horizontal strips text is counted in
+
+
+def _band_overlay(entries: list[tuple[int, TextBox]]) -> Overlay:
+    top = min(b.y for _, b in entries)
+    bottom = max(b.y + b.h for _, b in entries)
+    sample = Counter(_norm(b.text) for _, b in entries).most_common(1)[0][0]
+    return Overlay("subtitles", Region(0.0, top, 1.0, bottom - top).padded(REGION_PAD), sample)
+
+
+def subtitle_bands(frames: Sequence[FrameText]) -> list[Overlay]:
+    """Horizontal bands where centred text keeps changing: burned-in subtitles."""
+    strips: dict[int, list[tuple[int, TextBox]]] = {}
+    for index, frame in enumerate(frames):
+        for b in _confident(frame.boxes):
+            if abs(b.center[0] - 0.5) <= SUB_CENTRE and b.h <= SUB_MAX_H:
+                strips.setdefault(int(b.center[1] / SUB_BIN), []).append((index, b))
+
+    def is_band(entries: list[tuple[int, TextBox]]) -> bool:
+        shown = len({i for i, _ in entries})
+        said = len({_norm(b.text) for _, b in entries})
+        return shown >= SUB_SHARE * len(frames) and said >= max(SUB_MIN_LINES, SUB_DISTINCT * shown)
+
+    # a strip counts with its neighbours: one line of text may straddle two strips
+    near = {k: [e for j in (k - 1, k, k + 1) for e in strips.get(j, [])] for k in strips}
+    chosen = sorted(k for k, entries in near.items() if is_band(entries))
+    bands: list[list[int]] = []
+    for k in chosen:
+        if bands and k - bands[-1][-1] <= 1:
+            bands[-1].append(k)
+        else:
+            bands.append([k])
+    return [_band_overlay([e for k in band for e in strips.get(k, [])]) for band in bands]
+
+
+# ---- black bars --------------------------------------------------------------------------------
+
+BAR_LEVEL = 16.0  # grey level under which a row or column of a frame is black
+MIN_BAR = 0.03  # bars thinner than this share of the frame are edge noise
+MAX_BAR_DIFF = 0.05  # bars on opposite sides differ by at most this share of the frame
+MIN_KEPT = 0.5  # cropping must keep at least this share of the frame
+
+
+def _bar_pair(profile: np.ndarray) -> tuple[int, int]:
+    """Black rows (or columns) at the start and at the end of `profile`, when they look like bars."""
+    dark = profile < BAR_LEVEL
+    size = len(profile)
+    first = int(np.argmin(dark)) if not dark.all() else size
+    last = int(np.argmin(dark[::-1])) if not dark.all() else size
+    if min(first, last) < MIN_BAR * size or abs(first - last) > MAX_BAR_DIFF * size:
+        return 0, 0
+    return first, last
+
+
+def black_bars(stack: np.ndarray) -> Region | None:
+    """The picture inside black bars, from a stack of grey frames (frames, height, width); None when
+    there are none. A row is black when its median is: text written in a bar covers too little of
+    it to count (unlike ffmpeg's cropdetect, which keeps the text)."""
+    rows = np.median(np.median(stack, axis=2), axis=0)
+    columns = np.median(np.median(stack, axis=1), axis=0)
+    top, bottom = _bar_pair(rows)
+    left, right = _bar_pair(columns)
+    height, width = len(rows), len(columns)
+    kept_h, kept_w = height - top - bottom, width - left - right
+    if (top, bottom, left, right) == (0, 0, 0, 0) or kept_h * kept_w < MIN_KEPT * height * width:
+        return None
+    return Region(round(left / width, 4), round(top / height, 4), round(kept_w / width, 4), round(kept_h / height, 4))
 
 
 # ---- static pixels -----------------------------------------------------------------------------
@@ -294,23 +369,20 @@ def _kind(text: str) -> Kind | None:
     return None
 
 
-def flag_frames(frames: Sequence[FrameText], overlays: Sequence[Overlay], duration: float) -> list[Flag]:
-    """Frames showing ads, sponsors, credits, behind-the-scenes or disclaimers (text outside the
-    overlays), and frames with title cards close to the start or end of the film."""
+def flag_frames(frames: Sequence[FrameText], overlays: Sequence[Overlay]) -> list[Flag]:
+    """Text outside the overlays saying ads, sponsors, credits, behind-the-scenes or disclaimers.
+    Text without such words is not flagged, even near the start or end: phones, letters and signs
+    in the story look just like title cards."""
     flags = []
     for frame in frames:
         boxes = [b for b in _confident(frame.boxes) if not any(o.region.contains(b.center) for o in overlays)]
-        found = [Flag(frame.time, k, b.text, _box_region(b)) for b in boxes if (k := _kind(b.text))]
-        if found:
-            flags.extend(found)
-        elif len(boxes) >= MIN_TITLE_BOXES and (frame.time < INTRO_SEC or frame.time > duration - OUTRO_SEC):
-            flags.append(Flag(frame.time, "title", " / ".join(b.text for b in boxes)))
+        flags.extend(Flag(frame.time, k, b.text, _box_region(b)) for b in boxes if (k := _kind(b.text)))
     return flags
 
 
 # ---- ranges and beats --------------------------------------------------------------------------
 
-REASONS = {"ad": "quảng cáo", "credit": "credit", "bts": "hậu trường", "disclaimer": "tuyên bố", "title": "thẻ tiêu đề"}
+REASONS = {"ad": "quảng cáo", "credit": "credit", "bts": "hậu trường", "disclaimer": "tuyên bố"}
 
 
 def _reason(flag: Flag) -> str:

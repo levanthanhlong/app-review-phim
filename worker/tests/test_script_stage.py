@@ -418,3 +418,130 @@ def test_rerun_with_an_identical_script_makes_no_backup(tmp_path: Path) -> None:
     run(project_dir, FakeLLM([GOOD]), force=True)
 
     assert not (project_dir / "work/script_backups").exists()
+
+
+def write_characters(project_dir: Path) -> None:
+    """Two people found by the characters stage: C01 in every beat, C02 only in B0003."""
+    report = {"faces_key": "k", "names": [], "names_warning": None, "characters": [
+        {"id": "C01", "faces": 30, "screen_sec": 30.0, "beats": ["B0001", "B0002", "B0003"], "pictures": []},
+        {"id": "C02", "faces": 8, "screen_sec": 8.0, "beats": ["B0003"], "pictures": []},
+    ]}  # fmt: skip
+    (project_dir / "work/characters.json").write_text(json.dumps(report))
+
+
+def test_unnamed_characters_stop_the_script_with_a_way_forward(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+
+    ok, events = run(project_dir, FakeLLM([]))
+
+    assert not ok
+    error = next(e for e in events if e["type"] == "error")
+    assert error["code"] == "characters_unnamed" and "Nhân vật" in error["message"]
+
+
+def test_skipping_the_naming_writes_as_before(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True))
+    llm = FakeLLM([GOOD])
+
+    ok, _ = run(project_dir, llm)
+
+    assert ok and "Nhân vật:" not in llm.inputs[0] and "Gọi đúng tên" not in llm.prompts[0]
+
+
+def test_named_characters_are_listed_per_scene_and_in_the_prompt(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cóc", "C02": "Ngọc Hoàng"}))
+    llm = FakeLLM([GOOD])
+
+    ok, _ = run(project_dir, llm)
+
+    assert ok
+    lines = llm.inputs[0].splitlines()
+    assert lines[0].endswith("| Nhân vật: Cóc") and lines[2].endswith("| Nhân vật: Cóc, Ngọc Hoàng")
+    assert "Cóc, Ngọc Hoàng" in llm.prompts[0] and "Gọi đúng tên" in llm.prompts[0]
+    assert "tin dòng" in llm.prompts[0]  # who is on screen beats the picture description
+
+
+def test_gender_goes_with_the_name_so_the_script_says_cô_or_anh(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cóc"}, genders={"C01": "nữ"}))
+    llm = FakeLLM([GOOD])
+
+    assert run(project_dir, llm)[0]
+    assert llm.inputs[0].splitlines()[0].endswith("| Nhân vật: Cóc (nữ)") and "Cóc (nữ)" in llm.prompts[0]
+
+
+def test_renaming_a_character_rewrites_the_script(tmp_path: Path) -> None:
+    from recap.characters import Choices, save_choices
+
+    project_dir = make_project(tmp_path)
+    write_characters(project_dir)
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cóc"}))
+    assert run(project_dir, FakeLLM([GOOD]))[0]
+    save_choices(project_dir, Choices(confirmed=True, names={"C01": "Cóc Tía"}))
+    llm = FakeLLM([GOOD])
+
+    ok, events = run(project_dir, llm)
+
+    assert ok and events[-1]["skipped"] is False and "Cóc Tía" in llm.inputs[0]
+
+
+# ---- channel voice (skill recap-script-vi) ---------------------------------------------------
+
+
+def _with_settings(project_dir: Path, **updates: object) -> None:
+    project = config.load_project(project_dir)
+    config.save_project(project_dir, project.model_copy(update={"settings": project.settings.model_copy(update=updates)}))
+
+
+def test_prompt_speaks_as_the_channel_and_ends_asking_to_subscribe(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    _with_settings(project_dir, channel_name="Cóc Review Phim", narrator="Cóc")
+    llm = FakeLLM([GOOD])
+
+    assert run(project_dir, llm)[0]
+    prompt = llm.prompts[0]
+    assert "Cóc Review Phim" in prompt and "xưng “Cóc”" in prompt and "đăng ký" in prompt
+    assert "{" + "channel" not in prompt and "{narrator}" not in prompt
+
+
+def test_changing_the_channel_or_narrator_rewrites_the_script(tmp_path: Path) -> None:
+    project_dir = make_project(tmp_path)
+    assert run(project_dir, FakeLLM([GOOD]))[0]
+    _with_settings(project_dir, narrator="Cóc")
+    llm = FakeLLM([GOOD])
+
+    ok, events = run(project_dir, llm)
+
+    assert ok and events[-1]["skipped"] is False
+
+
+def test_everyday_funny_style_is_offered() -> None:
+    from recap.stages.script import STYLES
+
+    assert "đời thường" in STYLES["doi_thuong_hai"]
+
+
+def test_each_part_is_told_its_place_in_the_video() -> None:
+    from recap.models import Settings
+    from recap.stages.script import part_prompt
+
+    def position(index: int, total: int) -> str:
+        text = part_prompt(Settings(), "Phim", index, total, "", 60.0, 3.0)
+        return next(line for line in text.splitlines() if line.startswith("VỊ TRÍ của phần này"))
+
+    assert "trọn khung" in position(1, 1)
+    assert "phần đầu" in position(1, 3) and "kêu gọi" not in position(1, 3)
+    assert "phần giữa" in position(2, 3)
+    assert "phần cuối" in position(3, 3) and "kêu gọi" in position(3, 3)
