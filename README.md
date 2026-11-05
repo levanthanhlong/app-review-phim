@@ -2,6 +2,8 @@
 
 RecapStudio: app macOS tạo video tóm tắt phim bằng AI chạy trên máy (spec: `docs/SPEC_RecapStudio.md`).
 
+Người phát triển (và Claude Code) đọc trước: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): kiến trúc, pipeline, bản đồ code, tính năng đã có, việc còn lại, quy trình làm việc.
+
 ## Cài đặt trên máy mới
 
 Cần: Mac Apple Silicon, macOS 14+, [Homebrew](https://brew.sh), Xcode (App Store), khoảng 30 GB trống.
