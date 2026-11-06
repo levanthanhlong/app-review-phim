@@ -24,6 +24,7 @@ struct PreviewView: View {
     @State private var timeline: [TimelineEntry] = []
     @State private var texts: [String: String] = [:]
     @State private var scriptError: String?
+    @State private var showReel = false
 
     private var isBusy: Bool { model.isBusy(project.id) }
     private func url(_ version: Version) -> URL { project.id.appending(path: version.path) }
@@ -60,6 +61,7 @@ struct PreviewView: View {
         .onChange(of: version) { _, _ in controller.load(exists(version) ? url(version) : nil) }
         .onChange(of: focusLine) { _, _ in jumpToFocus() }
         .onDisappear { controller.pause() }
+        .sheet(isPresented: $showReel) { ReelSheet(project: project) }
     }
 
     private var toolbar: some View {
@@ -68,8 +70,14 @@ struct PreviewView: View {
                 ForEach(Version.allCases) { Text($0.label).tag($0) }
             }
             .labelsHidden()
-            .frame(width: 200)
+            .frame(width: 155)
             Spacer()
+            Button {
+                controller.pause()
+                showReel = true
+            } label: { Label("Tạo Reel", systemImage: "film") }
+                .disabled(isBusy || !exists(.preview) || project.file.state(of: .assemble).status != .done)
+                .help("Tạo Reel dọc từ bản review đã ghép")
             Button { model.run(.export, project) } label: { Label("Render bản cuối (1080p)", systemImage: "film.stack") }
                 .disabled(isBusy || project.file.state(of: .assemble).status != .done)
                 .help(isBusy ? "Đang có tác vụ cho dự án này" : "Render từ file phim gốc, kèm phụ đề .srt và bản gắn phụ đề")

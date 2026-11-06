@@ -188,6 +188,7 @@ Lệnh cho app, chạy trên dự án (ngoài hàng đợi job nặng; mọi tha
 - `characters-save --file NAMING.json`: lưu tên nhân vật từ tab Nhân vật (mục 4.3c). Kết quả gồm `stale` và `choices`.
 - `beat-mark --beat B0001 --mark star|skip|keep|none`: Scene Browser. Kết quả gồm `marks` và `auto_skips` (beat do `inspect` tự bỏ, kèm lý do).
 - `music-choose --cue M01 --option N` / `music-edit --cue M01 [--prompt P] [--alt-prompt P] [--reroll]`: nhạc AI (mục 4.7).
+- `reel-plan [--cut L0001]`: liệt kê mốc và đề xuất câu dẫn bằng nhà cung cấp AI văn bản đã chọn. `reel-preview` và `reel-export` nhận `--cut`, `--cta` và `--revision` từ kế hoạch để kiểm tra bản review còn khớp.
 
 Lệnh phụ cho app (không cần dự án):
 - `python -m recap voices` → `result` với `{voices: [{engine, id, description, gender, region, featured}], default: {engine, voice}}`. Đọc danh mục có sẵn trong package nên trả về ngay, không nạp model.
@@ -325,7 +326,8 @@ Lựa chọn cũng áp dụng cho gợi ý tên, kế hoạch nhạc AI và vi�
 - `recap.mp4`: render lại timeline từ **file gốc** (đúng track âm thanh đã chọn), **luôn 1920×1080** (nguồn thấp hơn thì phóng to bằng lanczos và làm nét nhẹ `unsharp`), x264 bitrate trung bình 10 Mbps, tối đa 12 Mbps, âm thanh −14 LUFS như preview. Không ép bitrate tối thiểu: hình đơn giản (hoạt hình) tự dùng ít hơn mà vẫn nét (đo được: phim người đóng 8.8 Mbps, hoạt hình 6.6 Mbps).
 - `recap_subbed.mp4`: `recap.mp4` có phụ đề gắn cứng. Bản ffmpeg của Homebrew không có libass/freetype (không có filter `subtitles` hay `drawtext`), nên mỗi đoạn phụ đề được vẽ bằng Pillow thành một ảnh PNG trong suốt (chữ trắng, viền đen, font `settings.subtitle_font`, mặc định Arial; tên font hoặc đường dẫn file). Một file `ffconcat` định thời gian cho các ảnh, rồi dùng filter `overlay` chồng lên video. Font không tồn tại thì báo `font_missing` trước khi render.
 - Đã kiểm tra trên phim mẫu bằng Whisper word timestamps: từ đầu và từ cuối của mỗi đoạn lệch so với phụ đề trung vị dưới 0.25s. Chỗ lệch lớn nhất (khoảng 1.3s) nằm ở ranh giới giữa các đoạn được tách từ cùng một câu dài.
-- Tùy chọn khung dọc 9:16 (crop giữa, hoặc blur nền) cho TikTok. Để mức ưu tiên thấp (chưa làm).
+- **Reel 9:16** là đầu ra riêng, tạo từ tab Xem trước. Worker lấy mốc cuối câu kể hoặc đoạn thoại trong phần mở đầu, nhắm khoảng 4–5 phút tính cả câu dẫn. Nếu bản review thiếu mốc phù hợp, app báo có thể tạo Reel ngắn hơn. Mốc phải còn nội dung phía sau để xem bản đầy đủ. Model đọc kịch bản và đề xuất các điểm dừng còn tình tiết bỏ ngỏ. Người dùng có thể chọn lại mốc và sửa câu dẫn khi gợi ý AI không dùng được.
+- Reel giữ toàn bộ khung ngang (gồm banner và Vietsub gắn trong phim), dùng nền làm mờ để lấp khung dọc và nối thêm câu dẫn bằng giọng của dự án. Bản xem thử đoạn kết lưu ở `work/reel/ending.mp4`, bản xuất 1080×1920 lưu ở `output/recap_reel.mp4`. Worker ưu tiên bản review cuối còn khớp với bản xem trước, dùng bản xem trước khi chưa có bản cuối phù hợp.
 
 ---
 
@@ -513,6 +515,7 @@ Mỗi dòng stdout là một JSON object:
 5. **Preview & Export**
    - Trình phát `AVPlayerView` của macOS phát `recap_preview.mp4` hoặc `recap.mp4`. Danh sách dòng kịch bản bên cạnh, tự highlight theo thời gian phát. Bấm vào dòng thì nhảy tới đoạn đó.
    - Nút "Render bản cuối (1080p)", "Xuất SRT", "Mở thư mục Output".
+   - **Tạo Reel** đề xuất mốc và giải thích ngắn. Thanh trượt và menu bám mốc cuối từng dòng, có ô sửa câu dẫn và nút xem thử đoạn kết có giọng đọc trước khi xuất Reel.
 
 ### 7.3 Trải nghiệm
 

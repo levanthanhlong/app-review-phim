@@ -32,7 +32,7 @@ import unicodedata
 from dataclasses import asdict
 from pathlib import Path
 
-from recap import config, doctor, music_edit, script_edit, settings_update, voices
+from recap import config, doctor, music_edit, reel, script_edit, settings_update, voices
 from recap.beat_marks import auto_skips, load_marks
 from recap.character_edit import save_naming
 from recap.characters import load_choices
@@ -40,7 +40,8 @@ from recap.script_revise import revise_script
 from recap.events import Emitter, take_protocol_stdout
 from recap.models import STAGE_NAMES
 from recap.project_rename import rename_project
-from recap.runner import Cancelled, install_signal_handlers, run_stage
+from recap.media import MediaError
+from recap.runner import Cancelled, StageFailure, install_signal_handlers, run_stage
 from recap.stages import STAGES
 from recap.tts_engines import TTSError, rate_factor
 
@@ -115,6 +116,16 @@ def build_parser() -> argparse.ArgumentParser:
     mark.add_argument("--project", required=True, type=Path)
     mark.add_argument("--beat", required=True)
     mark.add_argument("--mark", required=True, choices=("star", "skip", "keep", "none"))
+
+    reel_plan = sub.add_parser("reel-plan", help="đề xuất điểm cắt Reel và câu dẫn")
+    reel_plan.add_argument("--project", required=True, type=Path)
+    reel_plan.add_argument("--cut")
+    for command in ("reel-preview", "reel-export"):
+        reel_render = sub.add_parser(command, help="render đoạn kết hoặc toàn bộ Reel")
+        reel_render.add_argument("--project", required=True, type=Path)
+        reel_render.add_argument("--cut", required=True)
+        reel_render.add_argument("--cta", required=True)
+        reel_render.add_argument("--revision", required=True)
 
     for name in STAGE_NAMES:
         stage = sub.add_parser(name, help=f"chạy stage {name}")
@@ -260,6 +271,27 @@ def cmd_script(args: argparse.Namespace, emitter: Emitter) -> int:
     return EXIT_OK
 
 
+def cmd_reel(args: argparse.Namespace, emitter: Emitter) -> int:
+    try:
+        directory = args.project.resolve()
+        project = config.load_project(directory)
+        if args.command == "reel-plan":
+            data = reel.plan(directory, project, args.cut)
+        else:
+            data = reel.render(directory, project, args.cut, args.cta, args.revision, args.command == "reel-preview", emitter)
+    except StageFailure as exc:
+        emitter.error(None, exc.code, exc.message, retryable=exc.retryable)
+        return EXIT_FAILED
+    except config.ProjectError as exc:
+        emitter.error(None, exc.code, exc.message, retryable=False)
+        return EXIT_FAILED
+    except (TTSError, MediaError, OSError) as exc:
+        emitter.error(None, "reel_failed", f"Không tạo được Reel: {exc}", retryable=True)
+        return EXIT_FAILED
+    emitter.result(args.command, data)
+    return EXIT_OK
+
+
 def cmd_run(args: argparse.Namespace, emitter: Emitter) -> int:
     start, end = STAGE_NAMES.index(args.from_stage), STAGE_NAMES.index(args.to_stage)
     for name in STAGE_NAMES[start : end + 1]:
@@ -290,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_voices(args, emitter)
         if args.command == "voice-preview":
             return cmd_voice_preview(args, emitter)
+        if args.command in ("reel-plan", "reel-preview", "reel-export"):
+            return cmd_reel(args, emitter)
         if args.command in ("music-choose", "music-edit"):
             return cmd_music(args, emitter)
         if args.command in ("script-show", "script-save", "script-rewrite", "script-revise", "beat-mark", "characters-save"):

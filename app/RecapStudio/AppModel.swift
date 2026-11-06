@@ -125,14 +125,22 @@ final class AppModel {
         if let job = runState(project.id).jobID { queue.cancel(job) }
     }
 
-    private func enqueue(_ project: ProjectSummary, _ arguments: [String], title: String) {
+    private func enqueue(_ project: ProjectSummary, _ arguments: [String], title: String,
+                         onEvent: (@MainActor (WorkerEvent) -> Void)? = nil) {
         let request = JobRequest(projectDir: project.id, arguments: arguments, title: "\(project.file.title): \(title)")
         let state = runState(project.id)
         state.begin(jobID: request.id, title: title)
         queue.enqueue(request) { [weak self, weak state] event in
             state?.handle(event)
             self?.after(event, project: project.file.title)
+            onEvent?(event)
         }
+    }
+
+    func runReel(_ project: ProjectSummary, command: String, options: [String], title: String,
+                 onEvent: @escaping @MainActor (WorkerEvent) -> Void) {
+        guard !isBusy(project.id) else { return }
+        enqueue(project, [command, "--project", project.id.path] + options, title: title, onEvent: onEvent)
     }
 
     private func after(_ event: WorkerEvent, project title: String) {

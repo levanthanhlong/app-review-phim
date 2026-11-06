@@ -110,6 +110,7 @@ Hai backend gọi CLI đã đăng nhập qua `recap/llm/`. Fingerprint và cache
 | `recap/script_model.py` | schema + validate `script.yaml` |
 | `recap/script_edit.py` | `script-show/save/rewrite`, `beat-mark` |
 | `recap/script_revise.py` | `script-revise`: viết lại cả kịch bản theo nhận xét |
+| `recap/reel.py` | đề xuất mốc cắt phần mở đầu, tạo giọng cho câu dẫn, xem thử và xuất Reel dọc |
 | `recap/characters.py` / `faces.py` / `character_names.py` / `character_edit.py` | gom mặt, model mặt (tải lần đầu, SHA-256), tìm tên, lệnh `characters-save` |
 | `recap/inspect_rules.py` / `ocr.py` / `ad_blurs.py` / `cleanup.py` / `beat_marks.py` | luật inspect, Vision OCR, làm mờ quảng cáo, filter ffmpeg làm sạch, đánh dấu cảnh |
 | `recap/fit.py` / `beats.py` / `render.py` / `timeline_render.py` | căn khớp clip–lời, render từng dòng có cache |
@@ -135,7 +136,7 @@ Hai backend gọi CLI đã đăng nhập qua `recap/llm/`. Fingerprint và cache
 | `SceneBrowserView.swift` | tab "Cảnh": lưới beat, ⭐/🚫/"Vẫn dùng cảnh này" |
 | `CharactersView.swift`, `CharacterCard.swift`, `CharacterScenesView.swift` | tab "Nhân vật": ảnh chân dung, xem các cảnh xuất hiện, đặt tên, giới tính, gộp, bỏ qua |
 | `ScriptEditorView.swift`, `ScriptLineRow.swift`, `ScriptEditorState.swift`, `ReviseScriptSheet.swift` | tab "Kịch bản" |
-| `PreviewView.swift` | tab "Xem trước" + xuất |
+| `PreviewView.swift`, `ReelSheet.swift` | tab "Xem trước", xuất bản đầy đủ và duyệt mốc cắt Reel |
 | `NewProjectSheet.swift` | tạo dự án + cài đặt dự án (`EditableSettings` → `recap set`) |
 | `AppSettings.swift`, `SettingsView.swift` | cài đặt toàn app (UserDefaults): đường dẫn worker, python, thư mục dự án, nhạc, ảnh kênh |
 | `project.yml` | XcodeGen (bundle `com.thanhle.RecapStudio`, Swift 6, không sandbox) |
