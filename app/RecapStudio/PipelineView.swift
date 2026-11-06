@@ -207,15 +207,16 @@ struct Thumbnail: View {
     var cornerRadius: CGFloat = 6
 
     var body: some View {
-        Group {
-            if let url, let image = NSImage(contentsOf: url) {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                Rectangle().fill(.quaternary)
-                    .overlay(Image(systemName: "film").font(.title2).foregroundStyle(.secondary))
+        Rectangle()
+            .fill(.quaternary)
+            .overlay {
+                if let url, let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "film").font(.title2).foregroundStyle(.secondary)
+                }
             }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
 }
 
