@@ -1,6 +1,6 @@
 """Source cleanup when rendering, from what the `inspect` stage found (work/inspect.json):
 the source's watermarks are blurred, ads shown over the film are blurred while they show, and
-black bars are cropped off.
+black bars are cropped while preserving the lower bar when it contains subtitles.
 
 Regions are fractions of the source frame, so one filter works on the 480p proxy (preview) and
 on the original film (export) alike: ffmpeg evaluates them with `iw`/`ih` and `main_w`/`main_h`.
@@ -27,10 +27,14 @@ class SourceCleanup:
     blurs: tuple[Region, ...] = ()
     crop: Region | None = None
     timed: tuple[TimedBlur, ...] = ()  # ads over the film, blurred only while they show
+    keep_subtitle_bar: bool = False
 
     def key(self) -> str:
         """Stable text for fingerprints and render cache keys."""
-        return json.dumps(asdict(self), sort_keys=True)
+        data = asdict(self)
+        if not self.keep_subtitle_bar:
+            del data["keep_subtitle_bar"]  # preserve existing cache keys
+        return json.dumps(data, sort_keys=True)
 
 
 def _num(value: float) -> str:
@@ -60,10 +64,21 @@ def load_cleanup(project_dir: Path) -> SourceCleanup:
         return SourceCleanup()
     marks = report.get("watermarks")
     blurs = tuple(r for r in map(_clamped, marks if isinstance(marks, list) else []) if r is not None)
-    letterbox = report.get("letterbox")
+    crop = _clamped(report.get("letterbox"))
+    keep_subtitle_bar = False
+    subtitles = report.get("subtitles")
+    if crop is not None and isinstance(subtitles, list):
+        bottom = round(crop.y + crop.h, 4)
+        keep_subtitle_bar = any(band is not None and round(band.y + band.h, 4) > bottom
+                                for band in map(_clamped, subtitles))
+        if keep_subtitle_bar:
+            crop = Region(0.0, crop.y, 1.0, round(1.0 - crop.y, 4)) if crop.y > 0 else None
     ads = report.get("ad_blurs")
-    return SourceCleanup(blurs=blurs, crop=_clamped(letterbox) if isinstance(letterbox, dict) else None,
-                         timed=tuple(t for t in map(_timed, ads if isinstance(ads, list) else []) if t is not None))
+    return SourceCleanup(
+        blurs=blurs, crop=crop,
+        timed=tuple(t for t in map(_timed, ads if isinstance(ads, list) else []) if t is not None),
+        keep_subtitle_bar=keep_subtitle_bar,
+    )
 
 
 def _timed(raw: Any) -> TimedBlur | None:

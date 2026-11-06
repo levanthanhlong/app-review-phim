@@ -27,6 +27,14 @@ enum Snapshot {
                 await render(ProjectSettingsSheet(project: project), size: CGSize(width: 640, height: 1260), model: model,
                              to: dir.appending(path: "project-settings.png"))
             }
+            if let ready = model.projects.first(where: {
+                FileManager.default.fileExists(atPath: $0.id.appending(path: PreviewView.Version.preview.path).path)
+            }) {
+                await render(ProjectDetailView(project: ready, initialTab: .scenes), size: CGSize(width: 700, height: 580),
+                             model: model, to: dir.appending(path: "scenes.png"))
+                await render(ProjectDetailView(project: ready, initialTab: .preview), size: CGSize(width: 980, height: 640),
+                             model: model, to: dir.appending(path: "preview.png"))
+            }
             if let project, project.file.settings.musicSource == "ai" {
                 await render(AIMusicView(project: project).padding(24), size: CGSize(width: 980, height: 420), model: model,
                              to: dir.appending(path: "ai-music.png"))

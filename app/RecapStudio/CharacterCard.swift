@@ -9,8 +9,7 @@ struct CharacterCard: View {
     let labels: [String]
     let projectDir: URL
     @Binding var choices: CharacterChoices
-
-    private static let pictureSize: CGFloat = 64
+    let showScenes: () -> Void
 
     private var id: String { character.id }
     private var mergedInto: String? { choices.merged[id] }
@@ -28,8 +27,7 @@ struct CharacterCard: View {
                 Label("Cùng người với \(target)\(choices.displayName(id).map { " (\($0))" } ?? "")", systemImage: "link")
                     .font(.callout).foregroundStyle(.secondary)
             } else {
-                nameField
-                genderPicker
+                CharacterNamingFields(id: id, heard: heard, labels: labels, choices: $choices)
             }
             HStack {
                 mergePicker
@@ -45,10 +43,47 @@ struct CharacterCard: View {
     }
 
     private var pictures: some View {
-        HStack(spacing: 6) {
-            ForEach(character.pictureURLs(in: projectDir), id: \.self) { url in
-                Thumbnail(url: url, cornerRadius: 8).frame(width: Self.pictureSize, height: Self.pictureSize)
+        let urls = character.pictureURLs(in: projectDir)
+        return Button(action: showScenes) {
+            VStack(spacing: 6) {
+                Thumbnail(url: urls.first, cornerRadius: 8)
+                    .frame(width: 132, height: 176).clipped()
+                HStack(spacing: 6) {
+                    ForEach(urls.dropFirst(), id: \.self) { url in
+                        Thumbnail(url: url, cornerRadius: 6).frame(width: 39, height: 52).clipped()
+                    }
+                }
+                Label("Xem cảnh", systemImage: "play.circle").font(.callout)
             }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Xem cảnh của \(id)")
+    }
+
+    private var mergePicker: some View {
+        Picker("Gộp vào", selection: Binding(get: { mergedInto }, set: { choices = choices.merging(id, into: $0) })) {
+            Text("Người riêng").tag(String?.none)
+            ForEach(others) { other in
+                Text(other.id + (choices.displayName(other.id).map { " · \($0)" } ?? "")).tag(String?.some(other.id))
+            }
+        }
+        .frame(maxWidth: 200)
+        .help("Hai thẻ là cùng một người (ví dụ cùng nhân vật ở góc mặt khác)")
+    }
+}
+
+struct CharacterNamingFields: View {
+    let id: String
+    let heard: [NameCandidate]
+    let labels: [String]
+    @Binding var choices: CharacterChoices
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            nameField
+            genderPicker
         }
     }
 
@@ -86,16 +121,6 @@ struct CharacterCard: View {
         .help("Để kịch bản xưng đúng anh hay cô với tên riêng")
     }
 
-    private var mergePicker: some View {
-        Picker("Gộp vào", selection: Binding(get: { mergedInto }, set: { choices = choices.merging(id, into: $0) })) {
-            Text("Người riêng").tag(String?.none)
-            ForEach(others) { other in
-                Text(other.id + (choices.displayName(other.id).map { " · \($0)" } ?? "")).tag(String?.some(other.id))
-            }
-        }
-        .frame(maxWidth: 200)
-        .help("Hai thẻ là cùng một người (ví dụ cùng nhân vật ở góc mặt khác)")
-    }
 }
 
 /// Edit the generic names offered for everyone (one per line).

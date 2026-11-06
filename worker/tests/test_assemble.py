@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from recap import config, media
+from recap.branding import BrandStyle, brand_layout
 from recap.cleanup import SourceCleanup
 from recap.fit import Segment, TimelineEntry
 from recap.inspect_rules import Region
@@ -184,6 +185,24 @@ def test_item_args_clean_every_segment_before_scaling() -> None:
         assert "boxblur" in chain and "crop=w=iw*1:h=ih*0.75" in chain
         assert chain.index("crop=w=iw*1:h=ih*0.75") < chain.index("scale=")
     assert graph.count("split=2") == 2
+
+
+@pytest.mark.parametrize("overlay", [None, False, True])
+def test_render_fits_protected_subtitles_above_the_banner(overlay: bool | None) -> None:
+    entry = TimelineEntry("L0001", "original", 0.0, 2.0, [Segment(1.0, 3.0)])
+    cleanup = SourceCleanup(crop=Region(0.0, 0.125, 1.0, 0.875), keep_subtitle_bar=True)
+    brand = None
+    if overlay is not None:
+        layout = brand_layout((600, 50), PREVIEW.width, PREVIEW.height, BrandStyle(overlay=overlay))
+        brand = (layout, Path("brand.png"))
+    args = item_args(entry, Path("s.mp4"), None, PREVIEW, 25, 0.0, True, True, Path("o.mkv"),
+                     brand=brand, cleanup=cleanup)
+    graph = args[args.index("-filter_complex") + 1]
+
+    assert "crop=w=iw*1:h=ih*0.875:x=iw*0:y=ih*0.125" in graph
+    fit_height = PREVIEW.height if brand is None else PREVIEW.height - layout.top - layout.bottom
+    assert f"scale={PREVIEW.width}:{fit_height}:force_original_aspect_ratio=decrease" in graph
+    assert "force_original_aspect_ratio=increase" not in graph
 
 
 @pytest.mark.integration

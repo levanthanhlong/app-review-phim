@@ -1,5 +1,4 @@
 import AppKit
-import AVKit
 import RecapKit
 import SwiftUI
 
@@ -44,9 +43,9 @@ struct PreviewView: View {
             Divider()
             if exists(version) {
                 HSplitView {
-                    VideoPlayer(player: controller.player)
-                        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                    lineList.frame(minWidth: 300, idealWidth: 380, maxWidth: 520)
+                    NativeVideoPlayer(player: controller.player)
+                        .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                    lineList.frame(minWidth: 260, idealWidth: 380, maxWidth: 520, maxHeight: .infinity)
                 }
             } else {
                 ContentUnavailableView {

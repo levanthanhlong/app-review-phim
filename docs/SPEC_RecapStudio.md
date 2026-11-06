@@ -152,7 +152,7 @@ RecapStudio/
 │   ├── inspect.json          # kết quả stage inspect (mục 5.4)
 │   ├── inspect/ocr.json      # cache chữ đọc được, 1 khung/giây (ghi dần, chạy tiếp được)
 │   ├── characters.json       # kết quả stage characters (mục 5.5)
-│   ├── characters/faces/f00001.jpg ... # ảnh mặt cho tab Nhân vật; faces.npz, names.json là cache
+│   ├── characters/portraits/…/f00001.jpg # ảnh nhân vật; faces.npz, names.json là cache
 │   ├── character_choices.json # tên người dùng đặt: {confirmed, names, merged, ignored}
 │   ├── beat_marks.json       # đánh dấu của người dùng: {beat_id: star|skip|keep}
 │   ├── scenes_described.json
@@ -237,7 +237,7 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
 Để kịch bản gọi đúng tên nhân vật. Stage này **không bắt buộc** (như `inspect`).
 
 1. Lấy 1 khung/giây từ **phim gốc** (mặt to hơn bản 480p; mất phim gốc thì dùng proxy và cảnh báo), thu về rộng 960px. YuNet tìm mặt, chỉ giữ mặt rõ: điểm ≥ 0.9, rộng ≥ 5% khung, gần nhìn thẳng (mũi lệch ≤ 0.35 khoảng cách hai mắt). SFace tạo vector đặc trưng. Cache trong `work/characters/faces.npz` theo chữ ký video.
-2. Gom mặt bằng average-linkage, khoảng cách cosine 0.65. Người thấy ở < 3 khung là vai quần chúng, không đưa ra. Mỗi nhân vật (C01 = nhiều thời lượng nhất) có danh sách beat xuất hiện và 6 ảnh mặt 160px.
+2. Gom mặt bằng average-linkage, khoảng cách cosine 0.65. Người thấy ở < 3 khung là vai quần chúng, không đưa ra. Mỗi nhân vật (C01 = nhiều thời lượng nhất) có danh sách beat xuất hiện. Trong tối đa 20 ứng viên có mặt lớn, ưu tiên mặt đủ sáng rồi xếp theo độ nét (phương sai Laplacian). Lưu tối đa 6 ảnh chân dung 240×320, mở rộng khung xuống vai, ảnh tốt nhất đứng đầu.
 3. Claude tìm **tên riêng** trong thoại (`prompts/find_names.md`), trả JSON; tên nào không có thật trong thoại thì bỏ (chữ Thái/Lào/Khmer/CJK so khớp chuỗi con, chữ khác theo ranh giới từ). Cache theo transcript + model + prompt.
 4. Ghi `characters.json`. Tìm mặt lại từ đầu (video đổi) thì mã nhân vật mang nghĩa khác nên xoá tên đã đặt.
 
@@ -255,7 +255,12 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
 - **Cache theo beat id**: chạy lại chỉ xử lý beat chưa có mô tả. In progress theo từng beat.
 - Output `scenes_described.json` = `scenes.json` thêm trường `desc`.
 
-### 4.5 `script` (Claude Code CLI)
+### 4.5 `script` (Claude Code hoặc Codex)
+
+Trong phần **AI văn bản** của Cài đặt dự án, chọn `llm_provider` (`claude_cli` hoặc `codex_cli`)
+và model tương ứng. Codex dùng `codex exec` với mức suy luận Medium và tài khoản đã đăng nhập.
+Lựa chọn cũng áp dụng cho gợi ý tên, kế hoạch nhạc AI và viết lại kịch bản.
+
 
 1. **Tạo digest**: chia phim thành các phần khoảng 30 phút (`part_size_min`). Mỗi phần là file text gọn, mỗi dòng một beat:
    ```
@@ -309,7 +314,7 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
 
 - Không đoạn phim liền nào dài quá 8 giây khi kéo dài clip để khớp lời kể (`fit.MAX_SEGMENT_SEC`).
 - **Âm thanh**: khi đang có lời kể, tiếng phim ở `duck_volume` (mặc định **0 = tắt**), có fade 0.2s ở hai đầu. Đoạn `original` để âm lượng 1.0. Chuẩn hóa toàn bộ về **−14 LUFS** (mức YouTube/Facebook phát).
-- **Làm sạch nguồn** (từ `inspect.json`, module `cleanup`): watermark làm mờ suốt video, quảng cáo chèn đè làm mờ trong khoảng thời gian của nó, viền đen bị cắt. Vùng tính theo tỉ lệ khung nên dùng chung cho proxy và file gốc; filter đặt ngay sau input đã seek nên thời gian tính từ đầu mỗi đoạn. Chỉ báo cáo `inspect` thay đổi phần làm sạch thì mới render lại (đổi danh sách beat bỏ thì không).
+- **Làm sạch nguồn** (từ `inspect.json`, module `cleanup`): watermark làm mờ suốt video, quảng cáo chèn đè làm mờ trong lúc xuất hiện và viền đen được cắt. Khi dải phụ đề phát hiện được chạm vào phần viền đen dưới, chỉ cắt viền trên. Khung đã cắt được thu vừa vùng phim và nằm trên banner để giữ trọn dải phụ đề. Quy tắc áp dụng cho cả preview và bản xuất. Tọa độ tính theo tỉ lệ khung nên dùng chung cho proxy và file gốc. Thay đổi vùng làm sạch sẽ tạo lại clip render tương ứng.
 - **Banner kênh** (`brand_banner`, `brand_logo`): film co vào khung, dải banner dưới, dải phim mỏng trên, logo tròn ở góc. Tùy chỉnh trong `brand.json` đặt cạnh ảnh banner: `top_ratio` (0–0.02, mặc định 0.02), `bottom_ratio` (0.03–0.08, mặc định 0.08), `banner_align` (left/center/right), `overlay` (banner đè lên mép phim) + `overlay_opacity` (0.6), `video_fit` (`fill` = cắt phần thừa, không viền đen; `fit` = giữ cả hình), `logo_corner`, `logo_ratio` (0.07).
 - **Render**: `assemble` tạo `recap_preview.mp4` (480p, nhanh, từ proxy). Bản cuối do stage `export` render từ file gốc. Mỗi dòng timeline được render thành một clip riêng trong `work/render/<profile>/` và cache theo hash, nên sửa một câu chỉ render lại câu đó (module `timeline_render`, dùng chung cho cả hai).
 - Chuyển cảnh: cắt thẳng; có tùy chọn crossfade 0.2s.
@@ -348,6 +353,7 @@ Người dùng giữ lại cảnh bị tự bỏ bằng mark `keep` ("Vẫn dùn
     "whisper_model": "mlx-community/whisper-large-v3-turbo",
     "llm_provider": "claude_cli",
     "claude_model": "sonnet",
+    "codex_model": "gpt-6.1-sol",
     "whisper_task": "transcribe",
     "scene_detector": "adaptive",
     "scene_threshold": null,
@@ -423,7 +429,7 @@ Mọi vùng tính theo tỉ lệ khung (0–1, gốc trên trái). `letterbox` l
 {
   "faces_key": "<chữ ký video>|1",
   "characters": [{"id": "C01", "faces": 187, "screen_sec": 187.0, "beats": ["B0003", "B0004"],
-                  "pictures": ["characters/faces/f00239.jpg"]}],
+                  "pictures": ["characters/portraits/<video-key>/f00239.jpg"]}],
   "names": [{"name": "Hiro", "count": 1, "examples": ["Hiro... ไขยวะ"]}],
   "names_warning": null
 }
@@ -484,14 +490,16 @@ Mỗi dòng stdout là một JSON object:
    - Banner lỗi: ví dụ `llm_quota` → "Hết hạn mức Claude, thử lại lúc …", kèm nút Retry.
 
 3. **Scene Browser**
-   - Lưới keyframe của các beat: mốc thời gian, mô tả, thoại.
+   - Thanh tab dự án nằm phía trên. Tab Cảnh có lưới ảnh và bộ lọc bên trái, trình phát và chi tiết cảnh bên phải. Lưới hiển thị mốc thời gian trên ảnh và phần mô tả hoặc thoại bên dưới.
    - Bấm vào một beat để phát đoạn đó (AVPlayer, seek tới `start`).
    - Đánh dấu beat ⭐ "quan trọng" (gửi kèm gợi ý cho Claude) hoặc 🚫 "bỏ qua".
    - Beat do `inspect` tự bỏ hiện mờ với nhãn 🤖🚫 và lý do ("Tự động bỏ: credit: …"); nút **"Vẫn dùng cảnh này"** đặt mark `keep`. Bộ lọc "Bỏ qua" gồm cả beat tự bỏ. Hộp chọn clip trong Script Editor cũng ẩn các beat bị bỏ.
    - Đổi mark thì `script` thành `stale`; chạy lại sẽ viết kịch bản mới (bản cũ vào `work/script_backups/`).
 
 3b. **Nhân vật**
-   - Lưới thẻ nhân vật: 6 ảnh mặt, thời lượng trên màn hình, số cảnh. Bên phải là các tên nghe được trong phim, kèm số lần và câu thoại mẫu.
+   - Lưới thẻ nhân vật hiển thị ảnh rõ nhất cỡ lớn, các ảnh còn lại cỡ nhỏ, thời lượng trên màn hình và số cảnh. Bên phải là các tên nghe được trong phim, kèm số lần và câu thoại mẫu.
+   - Bấm ảnh hoặc **Xem cảnh** để phát cảnh đầu tiên có nhân vật từ proxy. Chọn cảnh khác trong danh sách theo ảnh, mốc thời gian, mô tả và thoại. Có thể sửa tên và giới tính ngay khi xem. Sau khi đóng cửa sổ, bấm **Lưu tên** để ghi lại.
+   - Dự án có ảnh cũ hiện nút **Cập nhật ảnh**. Khi cache khuôn mặt còn hợp lệ, app dùng lại cache và giữ tên đã đặt. Việc cập nhật ảnh giữ nguyên dữ liệu dùng cho Mô tả cảnh và Viết kịch bản.
    - Mỗi thẻ: ô tên, chọn giới tính (Không rõ / Nam / Nữ), menu "Chọn" (tên trong phim; tên gọi chung: người đàn ông, người phụ nữ, cô gái, chàng trai, người đi đường, người anh, người em gái, người mẹ, con ma, con quỷ, sinh vật lạ, cậu bé… và nghề nghiệp). Danh sách tên gọi chung sửa được ("Sửa danh sách tên chung…", lưu trong UserDefaults, dùng cho mọi dự án). "Gộp vào" một thẻ khác (cùng người), "Bỏ qua (vai phụ)".
    - "Lưu tên" (⌘S) và "Bỏ qua, để máy tự gọi tên". Lưu xong thì báo các stage cần chạy lại.
 
@@ -503,7 +511,7 @@ Mỗi dòng stdout là một JSON object:
    - Nút **"Nhận xét & viết lại"**: người dùng viết nhận xét (có gợi ý mẫu), Claude viết lại cả kịch bản (`script-revise`, mục 4.5). Tắt khi còn sửa chưa lưu hoặc đang có job.
 
 5. **Preview & Export**
-   - AVPlayer phát `recap_preview.mp4`. Danh sách dòng kịch bản bên cạnh, tự highlight theo thời gian phát. Bấm vào dòng thì nhảy tới đoạn đó.
+   - Trình phát `AVPlayerView` của macOS phát `recap_preview.mp4` hoặc `recap.mp4`. Danh sách dòng kịch bản bên cạnh, tự highlight theo thời gian phát. Bấm vào dòng thì nhảy tới đoạn đó.
    - Nút "Render bản cuối (1080p)", "Xuất SRT", "Mở thư mục Output".
 
 ### 7.3 Trải nghiệm

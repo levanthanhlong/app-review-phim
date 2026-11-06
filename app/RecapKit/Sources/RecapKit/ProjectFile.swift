@@ -51,6 +51,9 @@ public struct StageState: Sendable, Codable, Equatable {
 public struct ProjectSettings: Sendable, Codable, Equatable {
     public let targetRatio: Double?
     public let narrationStyle: String?
+    public let llmProvider: String?
+    public let claudeModel: String?
+    public let codexModel: String?
     public let channelName: String?  // the channel the narrator speaks for
     public let narrator: String?  // what the narrator calls themself ("Mắm")
     public let ttsEngine: String?

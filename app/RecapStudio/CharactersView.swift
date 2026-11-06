@@ -15,6 +15,7 @@ struct CharactersView: View {
     @State private var message: String?
     @State private var isSaving = false
     @State private var showLabels = false
+    @State private var sceneCharacter: FilmCharacter?
 
     private var isBusy: Bool { model.isBusy(project.id) }
     private var hasChanges: Bool { draft != saved }
@@ -42,6 +43,10 @@ struct CharactersView: View {
         }
         .task(id: reloadKey) { reload() }
         .sheet(isPresented: $showLabels) { CharacterLabelsSheet() }
+        .sheet(item: $sceneCharacter) { character in
+            CharacterScenesView(character: character, projectDir: project.id, heard: report?.names ?? [],
+                                labels: model.settings.characterLabels, choices: $draft)
+        }
     }
 
     private func toolbar(_ report: CharacterReport) -> some View {
@@ -49,6 +54,11 @@ struct CharactersView: View {
             statusText
             Spacer()
             if isSaving { ProgressView().controlSize(.small) }
+            if report.characters.contains(where: { $0.pictures.contains { $0.hasPrefix("characters/faces/") } }) {
+                Button("Cập nhật ảnh", systemImage: "photo") { model.run(.characters, project) }
+                    .disabled(hasChanges)
+                    .help("Tạo ảnh mới từ dữ liệu khuôn mặt đã lưu. Lưu tên đang sửa trước khi cập nhật.")
+            }
             Button("Sửa danh sách tên chung…", systemImage: "list.bullet") { showLabels = true }
             Button("Bỏ qua, để máy tự gọi tên") { save(CharacterChoices.skipPayload()) }
                 .help("Kịch bản sẽ gọi nhân vật bằng cách gọi chung (cô gái, người đàn ông…)")
@@ -77,11 +87,14 @@ struct CharactersView: View {
                 ForEach(report.characters) { character in
                     CharacterCard(character: character, others: report.characters.filter { $0.id != character.id },
                                   heard: report.names, labels: model.settings.characterLabels,
-                                  projectDir: project.id, choices: $draft)
+                                  projectDir: project.id, choices: $draft) {
+                        sceneCharacter = character
+                    }
                 }
             }
             .padding(14)
         }
+        .disabled(isSaving)
     }
 
     private func reload() {

@@ -57,6 +57,11 @@ def _validated(current: Settings, updates: Mapping[str, Any]) -> Settings:
     except ValidationError as exc:
         problems = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise SettingsError(problems) from exc
+    if settings.llm_provider not in ("claude_cli", "codex_cli"):
+        raise SettingsError("Chọn Claude Code hoặc Codex làm nhà cung cấp AI")
+    selected_model = settings.codex_model if settings.llm_provider == "codex_cli" else settings.claude_model
+    if not selected_model.strip():
+        raise SettingsError("Tên model AI không được để trống")
     try:
         check_voice(settings.tts_engine, settings.voice)
         rate_factor(settings.tts_rate)

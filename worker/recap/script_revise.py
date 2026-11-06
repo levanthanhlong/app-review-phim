@@ -114,7 +114,7 @@ def revise_script(
     """Rewrite script.yaml following `feedback`; returns the stages marked stale."""
     notes = feedback.strip()
     if not notes:
-        raise ScriptEditError("feedback_missing", "Hãy viết nhận xét về kịch bản trước khi nhờ Claude viết lại")
+        raise ScriptEditError("feedback_missing", "Hãy viết nhận xét về kịch bản trước khi nhờ AI viết lại")
     script, items = _load(project_dir)
     project = config.load_project(project_dir)
     speed = _speed(script.words_per_sec, project.settings, speech_rate)

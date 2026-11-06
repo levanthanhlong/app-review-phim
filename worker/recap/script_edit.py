@@ -239,4 +239,4 @@ def rewrite_line(
                 return text
     except LLMError as exc:
         raise ScriptEditError(exc.code, exc.message, exc.retryable) from exc
-    raise ScriptEditError("llm_failed", "Claude không trả về câu nào, hãy thử lại", retryable=True)
+    raise ScriptEditError("llm_failed", "Model AI không trả về câu nào, hãy thử lại", retryable=True)

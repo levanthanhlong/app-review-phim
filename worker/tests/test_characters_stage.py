@@ -8,18 +8,30 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image, ImageFilter
 
 from recap import config
 from recap.characters import Choices, Face, load_choices, save_choices
 from recap.events import Emitter
 from recap.models import StageStatus
 from recap.runner import run_stage
-from recap.stages.characters import CHARACTERS, CharactersStage
+from recap.stages.characters import CHARACTERS, PICTURES_DIR, CharactersStage
 from tests.conftest import HAS_FFMPEG, make_clip
 from tests.test_cli import run_cli
 
 DURATION = 12
 PEOPLE = {name: v / np.linalg.norm(v) for name, v in ((n, np.random.default_rng(i).normal(size=128)) for i, n in enumerate(("pan", "hiro")))}
+
+
+def test_sharp_lit_portraits_rank_ahead_of_blurry_or_dark_ones() -> None:
+    from recap.stages.characters import _picture_score
+
+    grid = np.indices((80, 80)) // 8
+    sharp = Image.fromarray((((grid[0] + grid[1]) % 2) * 255).astype(np.uint8))
+    blurred = sharp.filter(ImageFilter.GaussianBlur(2))
+    dark = sharp.point(lambda value: value // 8)
+
+    assert _picture_score(sharp) > _picture_score(blurred) > _picture_score(dark)
 
 
 class FakeReader:
@@ -90,7 +102,11 @@ def test_people_their_pictures_and_the_names_said_are_listed(tmp_path: Path, cli
     pan, hiro = report["characters"]
     assert (pan["id"], pan["faces"], hiro["id"], hiro["faces"]) == ("C01", DURATION, "C02", 4)
     assert hiro["beats"] == ["B0002"]
-    assert pan["pictures"] and all((project_dir / "work" / p).is_file() for p in pan["pictures"] + hiro["pictures"])
+    assert len(pan["pictures"]) == 6 and len(hiro["pictures"]) == 4
+    for picture in pan["pictures"] + hiro["pictures"]:
+        assert f"work/{picture}".startswith(f"{PICTURES_DIR}/")
+        with Image.open(project_dir / "work" / picture) as portrait:
+            assert portrait.size == (240, 320)
     assert report["names"] == [{"name": "Hiro", "count": 1, "examples": ["Hiro ơi!"]}]
     assert not (project_dir / "work/characters/frames").exists()
 
@@ -115,8 +131,18 @@ def test_the_users_naming_survives_a_rerun_with_the_same_faces(tmp_path: Path, c
     project_dir = prepared(tmp_path, clip)
     run(project_dir, FakeReader(), FakeLLM())
     save_choices(project_dir, Choices(confirmed=True, names={"C01": "Pan", "C02": "Hiro"}))
-    (project_dir / "work/scenes.json").write_text((project_dir / "work/scenes.json").read_text() + " ")
+    choices = (project_dir / "work/character_choices.json").read_bytes()
+    (project_dir / PICTURES_DIR).rename(project_dir / "work/characters/legacy-pictures")
+    project = config.load_project(project_dir)
+    done = project.stages["characters"]
+    config.save_project(project_dir, project.with_stage("describe", done).with_stage("script", done))
 
-    run(project_dir, FakeReader(), FakeLLM())
+    reader, llm = FakeReader(), FakeLLM()
+    events = run(project_dir, reader, llm)
 
+    assert not events[-1]["skipped"]
+    assert reader.calls == llm.calls == 0
+    assert (project_dir / "work/character_choices.json").read_bytes() == choices
     assert load_choices(project_dir).names == {"C01": "Pan", "C02": "Hiro"}
+    updated = config.load_project(project_dir)
+    assert updated.stages["describe"] == updated.stages["script"] == done

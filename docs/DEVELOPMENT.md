@@ -74,9 +74,10 @@ Nguyên tắc cứng:
 | 10 | `assemble` | Căn khớp hình với lời, ducking, −14 LUFS, banner kênh, làm sạch nguồn; bản xem trước | ffmpeg | `work/timeline.json`, `output/recap_preview.mp4` |
 | 11 | `export` | Render 1080p từ file gốc, SRT, phụ đề gắn cứng | ffmpeg + Pillow | `output/recap.mp4`, `recap_subbed.mp4`, `recap.srt` |
 
-**Claude Code chỉ bắt buộc ở `script`.** Ngoài ra dùng ở: tìm tên (`characters`, không có vẫn chạy),
-nhạc AI, "✨ viết lại câu", "Nhận xét & viết lại". Chỉ có provider `claude_cli` (`recap/llm/claude_cli.py`,
-gọi `claude -p … --tools ""`: không tool, không skill). Hết hạn mức → `llm_quota`, giữ phần đã xong.
+Trong **Cài đặt dự án → AI văn bản**, người dùng chọn Claude Code hoặc Codex và chọn hoặc nhập mã model.
+Dự án cũ mặc định dùng Claude Sonnet. Codex mặc định dùng GPT‑6.1‑Sol ở mức suy luận Medium.
+Lựa chọn dùng chung cho viết kịch bản, tìm tên trong thoại, kế hoạch nhạc AI và các thao tác viết lại.
+Hai backend gọi CLI đã đăng nhập qua `recap/llm/`. Fingerprint và cache dùng model đang chọn.
 
 ### Cơ chế chạy lại (quan trọng)
 
@@ -132,7 +133,7 @@ gọi `claude -p … --tools ""`: không tool, không skill). Hết hạn mức 
 | `ContentView.swift` | sidebar dự án (đổi tên, xoá vào Thùng rác) |
 | `PipelineView.swift` | tab "Các bước": danh sách stage, banner lỗi (nút "Đặt tên nhân vật" cho `characters_unnamed`), log |
 | `SceneBrowserView.swift` | tab "Cảnh": lưới beat, ⭐/🚫/"Vẫn dùng cảnh này" |
-| `CharactersView.swift`, `CharacterCard.swift` | tab "Nhân vật": đặt tên, giới tính, gộp, bỏ qua; tên gọi chung sửa được |
+| `CharactersView.swift`, `CharacterCard.swift`, `CharacterScenesView.swift` | tab "Nhân vật": ảnh chân dung, xem các cảnh xuất hiện, đặt tên, giới tính, gộp, bỏ qua |
 | `ScriptEditorView.swift`, `ScriptLineRow.swift`, `ScriptEditorState.swift`, `ReviseScriptSheet.swift` | tab "Kịch bản" |
 | `PreviewView.swift` | tab "Xem trước" + xuất |
 | `NewProjectSheet.swift` | tạo dự án + cài đặt dự án (`EditableSettings` → `recap set`) |
@@ -182,7 +183,7 @@ output/<Tên>.recap/
 ├── work/
 │   ├── proxy_480p.mp4, audio_16k.wav, transcript.json, scenes.json, keyframes/
 │   ├── inspect.json, inspect/ocr.json
-│   ├── characters.json, characters/{faces.npz,names.json,faces/*.jpg}, character_choices.json
+│   ├── characters.json, characters/{faces.npz,names.json,portraits/…/*.jpg}, character_choices.json
 │   ├── beat_marks.json, scenes_described.json, describe_cache.json
 │   ├── digest/, script_parts/, script_backups/
 │   ├── tts/, music/, timeline.json, render/<profile>/, subs/
@@ -209,6 +210,9 @@ Schema chi tiết: SPEC §5. Swift đọc bằng `convertFromSnakeCase`; trườ
     (người đàn ông, cô gái, con ma… + nghề nghiệp, sửa được), giới tính nam/nữ, gộp, bỏ qua, "Bỏ qua, để
     máy tự gọi tên". Tên đi vào `describe` (sửa lỗi model nhìn ảnh đoán sai người/giới tính) và `script`.
     Chưa đặt tên thì `describe` dừng với `characters_unnamed`.
+  - Thẻ Nhân vật ưu tiên ảnh nét, đủ sáng và hiển thị ảnh chân dung 240×320. Bấm **Xem cảnh** để
+    xem các cảnh nhân vật xuất hiện và sửa tên. Nút **Cập nhật ảnh** cho dự án cũ dùng cache khuôn mặt
+    còn hợp lệ để giữ nguyên tên đã đặt. Chi tiết trong [kế hoạch tab Nhân vật](PLAN_character_picker.md).
   - Kịch bản: **"Nhận xét & viết lại"**, giọng kênh từ skill `recap-script-vi`, phong cách "Đời thường",
     tên kênh/cách xưng trong cài đặt dự án, kêu gọi like/đăng ký cuối video.
   - Đổi tên dự án (thư mục đổi theo) và xoá dự án (vào Thùng rác).
@@ -224,7 +228,6 @@ describe ~19 phút, script ~1,5–2 phút.
 
 | Việc | Trạng thái |
 |---|---|
-| Tab Nhân vật dễ nhận người hơn: xem cảnh khi bấm thẻ, ảnh 320px nửa người, chọn ảnh nét nhất | **Đã duyệt**, kế hoạch chi tiết: [`PLAN_character_picker.md`](PLAN_character_picker.md) |
 | M11 (2): QA tự động có ngưỡng chặn | chưa làm |
 | M11 (3): hồ sơ phim, viết kịch bản kể chuyện trước | chưa làm |
 | M11 (5): giọng đọc 150–170 từ/phút (hiện ~273), ngắt nghỉ, từ điển phát âm; clip | chưa làm |

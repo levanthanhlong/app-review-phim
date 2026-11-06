@@ -29,14 +29,14 @@ from recap import config, media
 from recap.character_names import NameCandidate, find_names
 from recap.characters import CHOICES_FILE, Character, Choices, Face, build_characters, cluster_faces, save_choices
 from recap.faces import FaceError, FaceReader
-from recap.llm import LLMError, LLMProvider, get_provider
+from recap.llm import LLMError, LLMProvider, get_provider, model_key, model_label
 from recap.models import SCENES_ADAPTER, TRANSCRIPT_ADAPTER, Project, Settings
 from recap.runner import StageContext, StageFailure
 
 CHARACTERS = "work/characters.json"
 WORK_DIR = "work/characters"
 FRAMES_DIR = f"{WORK_DIR}/frames"
-PICTURES_DIR = f"{WORK_DIR}/faces"  # relative to the project; pictures are listed relative to work/
+PICTURES_DIR = f"{WORK_DIR}/portraits"  # separate from the legacy 160 px face crops
 FACES_CACHE = f"{WORK_DIR}/faces.npz"
 NAMES_CACHE = f"{WORK_DIR}/names.json"
 PROXY = "work/proxy_480p.mp4"
@@ -44,8 +44,8 @@ SCENES = "work/scenes.json"
 TRANSCRIPT = "work/transcript.json"
 SAMPLE_FPS = 1.0
 FRAME_WIDTH = 960
-PICTURE_SIZE = 160
-PICTURE_MARGIN = 0.3  # around the face box, so hair and chin show
+PICTURE_SIZE = (240, 320)
+SAMPLES = 6
 FACES_VERSION = "1"  # bump when what `faces.py` keeps changes
 PROGRESS_EVERY = 20
 
@@ -80,11 +80,11 @@ class CharactersStage:
         self._provider_factory = provider_factory
 
     def outputs(self, project: Project) -> list[str]:
-        return [CHARACTERS]
+        return [CHARACTERS, PICTURES_DIR]
 
     def fingerprint(self, project_dir: Path, project: Project) -> str:
         sigs = [config.file_signature(p) for p in (_video(project_dir), project_dir / SCENES, project_dir / TRANSCRIPT)]
-        return "|".join([*sigs, FACES_VERSION, project.settings.claude_model, _names_prompt_hash()])
+        return "|".join([*sigs, FACES_VERSION, model_key(project.settings), _names_prompt_hash()])
 
     def run(self, ctx: StageContext) -> Project:
         video = _video(ctx.project_dir)
@@ -98,7 +98,7 @@ class CharactersStage:
             groups = cluster_faces(faces)
             beats = SCENES_ADAPTER.validate_json(ctx.path(SCENES).read_bytes()) if ctx.path(SCENES).is_file() else []
             characters = build_characters(faces, groups, beats, interval=1 / SAMPLE_FPS)
-            pictures = self._pictures(ctx, video, faces, characters)
+            pictures = self._pictures(ctx, video, faces, characters, key)
         finally:
             shutil.rmtree(ctx.path(FRAMES_DIR), ignore_errors=True)
         names, warning = self._names(ctx)
@@ -151,16 +151,33 @@ class CharactersStage:
         _save_faces(ctx.path(FACES_CACHE), key, faces)
         return faces
 
-    def _pictures(self, ctx: StageContext, video: Path, faces: list[Face], characters: list[Character]) -> dict[str, list[str]]:
-        """Face pictures per character (relative to work/), cropped from the frames when missing."""
-        wanted = {c.id: [f"characters/faces/f{i:05d}.jpg" for i in c.samples] for c in characters}
-        missing = [i for c in characters for i in c.samples if not ctx.path(f"{PICTURES_DIR}/f{i:05d}.jpg").is_file()]
-        if missing:
-            frames = self._frames(ctx, video)
-            ctx.path(PICTURES_DIR).mkdir(parents=True, exist_ok=True)
-            for index in missing:
-                _crop(frames, faces[index], ctx.path(f"{PICTURES_DIR}/f{index:05d}.jpg"))
-        return wanted
+    def _pictures(self, ctx: StageContext, video: Path, faces: list[Face], characters: list[Character],
+                  key: str) -> dict[str, list[str]]:
+        """Rank the face crops, then save wider portraits for the best samples."""
+        directory = ctx.path(PICTURES_DIR) / hashlib.sha256(key.encode()).hexdigest()[:16]
+        if not characters:
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            return {}
+        frames = self._frames(ctx, video)
+        pictures: dict[str, list[str]] = {}
+        for character in characters:
+            candidates = []
+            for index in character.samples:
+                face = faces[index]
+                frame_index = min(len(frames) - 1, round(face.time * SAMPLE_FPS))
+                with Image.open(frames[frame_index]) as frame:
+                    face_crop, portrait = _crops(frame, face)
+                candidates.append((_picture_score(face_crop), index, portrait))
+            best = sorted(candidates, key=lambda candidate: candidate[0], reverse=True)[:SAMPLES]
+            pictures[character.id] = []
+            directory.mkdir(parents=True, exist_ok=True)
+            for _, index, portrait in best:
+                path = directory / f"f{index:05d}.jpg"
+                tmp = path.with_suffix(".tmp")
+                portrait.save(tmp, format="JPEG", quality=88)
+                tmp.replace(path)
+                pictures[character.id].append(path.relative_to(ctx.path("work")).as_posix())
+        return pictures
 
     # ---- names -------------------------------------------------------------------------------
 
@@ -169,12 +186,12 @@ class CharactersStage:
         if not path.is_file():
             return [], "Chưa có lời thoại (transcript.json) để tìm tên"
         settings = ctx.project.settings
-        key = "|".join([config.file_signature(path), settings.claude_model, _names_prompt_hash()])
+        key = "|".join([config.file_signature(path), model_key(settings), _names_prompt_hash()])
         cached = _load_names(ctx.path(NAMES_CACHE), key)
         if cached is not None:
             return cached, None
         dialogue = TRANSCRIPT_ADAPTER.validate_json(path.read_bytes())
-        ctx.emitter.log("info", "Tìm tên nhân vật trong lời thoại: gọi Claude")
+        ctx.emitter.log("info", f"Tìm tên nhân vật trong lời thoại: gọi {model_label(settings)}")
         try:
             provider = self._provider_factory(settings)
         except LLMError as exc:
@@ -195,15 +212,24 @@ class CharactersStage:
             ctx.emitter.log("warning", "Khuôn mặt đã được tìm lại từ đầu: hãy đặt tên nhân vật lại")
 
 
-def _crop(frames: list[Path], face: Face, out: Path) -> None:
-    index = min(len(frames) - 1, round(face.time * SAMPLE_FPS))
-    with Image.open(frames[index]) as frame:
-        width, height = frame.size
-        x, y, w, h = face.box
-        side = max(w * width, h * height) * (1 + 2 * PICTURE_MARGIN)
-        cx, cy = (x + w / 2) * width, (y + h / 2) * height
-        box = (int(max(0, cx - side / 2)), int(max(0, cy - side / 2)), int(min(width, cx + side / 2)), int(min(height, cy + side / 2)))
-        frame.convert("RGB").crop(box).resize((PICTURE_SIZE, PICTURE_SIZE)).save(out, quality=88)
+def _picture_score(face: Image.Image) -> tuple[bool, float]:
+    import cv2
+
+    gray = np.asarray(face.convert("L").resize((96, 96), Image.Resampling.BILINEAR))
+    return bool(gray.mean() >= 40), float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def _crops(frame: Image.Image, face: Face) -> tuple[Image.Image, Image.Image]:
+    width, height = frame.size
+    x, y, w, h = (value * scale for value, scale in zip(face.box, (width, height, width, height)))
+    face_crop = frame.crop((max(0, x), max(0, y), min(width, x + w), min(height, y + h)))
+    aspect = PICTURE_SIZE[0] / PICTURE_SIZE[1]
+    crop_h = min(height, width / aspect, max(2.6 * h, 2.6 * w / aspect))
+    crop_w = crop_h * aspect
+    left = min(max(0, x + w / 2 - crop_w / 2), width - crop_w)
+    top = min(max(0, y + h / 2 - crop_h / 3), height - crop_h)
+    portrait = frame.crop((left, top, left + crop_w, top + crop_h)).convert("RGB")
+    return face_crop, portrait.resize(PICTURE_SIZE, Image.Resampling.LANCZOS)
 
 
 def _save_faces(path: Path, key: str, faces: list[Face]) -> None:

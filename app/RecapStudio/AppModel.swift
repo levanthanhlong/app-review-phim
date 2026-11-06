@@ -276,7 +276,7 @@ final class AppModel {
         if !hint.isEmpty { args += ["--hint", hint] }
         let outcome = try await client.run(args)
         if let failure = outcome.failure { throw AppError(failure) }
-        guard let text = outcome.result?["text"]?.stringValue else { throw AppError("Claude không trả về câu nào") }
+        guard let text = outcome.result?["text"]?.stringValue else { throw AppError("Model AI không trả về câu nào") }
         return text
     }
 

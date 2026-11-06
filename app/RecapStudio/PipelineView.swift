@@ -23,12 +23,17 @@ enum ProjectTab: String, CaseIterable, Identifiable {
 struct ProjectDetailView: View {
     @Environment(AppModel.self) private var model
     let project: ProjectSummary
-    @State private var tab = ProjectTab.pipeline
+    @State private var tab: ProjectTab
     @State private var showSettings = false
     @State private var showLog = false
     @State private var previewLine: String?  // line to jump to when the preview tab opens
 
     static let logHeight: CGFloat = 220
+
+    init(project: ProjectSummary, initialTab: ProjectTab = .pipeline) {
+        self.project = project
+        _tab = State(initialValue: initialTab)
+    }
 
     private var state: ProjectRunState { model.runState(project.id) }
     private var isBusy: Bool { model.isBusy(project.id) }
@@ -41,19 +46,26 @@ struct ProjectDetailView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 620)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+            .layoutPriority(1)
             Divider()
-            switch tab {
-            case .pipeline: pipeline
-            case .scenes: SceneBrowserView(project: project)
-            case .characters: CharactersView(project: project)
-            case .script:
-                ScriptEditorView(project: project) { line in
-                    previewLine = line
-                    tab = .preview
+            Group {
+                switch tab {
+                case .pipeline: pipeline
+                case .scenes: SceneBrowserView(project: project)
+                case .characters: CharactersView(project: project)
+                case .script:
+                    ScriptEditorView(project: project) { line in
+                        previewLine = line
+                        tab = .preview
+                    }
+                case .preview: PreviewView(project: project, focusLine: $previewLine)
                 }
-            case .preview: PreviewView(project: project, focusLine: $previewLine)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             LogPanel(state: state, isExpanded: $showLog)
                 .frame(height: showLog ? Self.logHeight : nil)

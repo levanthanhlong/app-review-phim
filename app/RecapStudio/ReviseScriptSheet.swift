@@ -18,7 +18,7 @@ struct ReviseScriptSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Nhận xét kịch bản").font(.title3.bold())
-            Text("Viết những điểm muốn sửa. Claude sẽ viết lại cả kịch bản theo nhận xét, giữ các câu đã tốt "
+            Text("Viết những điểm muốn sửa. Model AI sẽ viết lại cả kịch bản theo nhận xét, giữ các câu đã tốt "
                  + "và vẫn theo đúng các cảnh có trong phim.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $draft)

@@ -1,4 +1,3 @@
-import AVKit
 import RecapKit
 import SwiftUI
 
@@ -59,14 +58,25 @@ struct SceneBrowserView: View {
                 ContentUnavailableView("Chưa có cảnh", systemImage: "square.grid.3x3",
                                        description: Text("Chạy tới bước “Chia cảnh” (và “Mô tả cảnh”) ở tab Các bước."))
             } else {
-                HSplitView {
-                    VStack(spacing: 0) {
-                        toolbar.padding(.horizontal, 14).padding(.vertical, 8)
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            toolbar
+                            Divider()
+                            if shown.isEmpty {
+                                ContentUnavailableView("Không có cảnh trong bộ lọc này", systemImage: "line.3.horizontal.decrease")
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                BeatGrid(beats: shown, marks: marks, autoSkips: autoSkips, projectDir: project.id, selected: $selected)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         Divider()
-                        BeatGrid(beats: shown, marks: marks, autoSkips: autoSkips, projectDir: project.id, selected: $selected)
+                        detail
+                            .frame(width: min(480, max(260, geometry.size.width * 0.40)))
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .background(.background)
                     }
-                    .frame(minWidth: 420, maxWidth: .infinity)
-                    detail.frame(minWidth: 320, idealWidth: 420, maxWidth: 560)
                 }
             }
         }
@@ -76,42 +86,56 @@ struct SceneBrowserView: View {
     }
 
     private var toolbar: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Cảnh trong phim", systemImage: "film").font(.headline)
+                Spacer()
+                Text("\(shown.count) / \(beats.count) cảnh")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
             Picker("Lọc", selection: $filter) {
                 ForEach(Filter.allCases) { Text($0.label).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(maxWidth: 340)
-            Spacer()
-            let starred = marks.values.filter { $0 == .star }.count
-            let skipped = beats.filter { isSkipped($0.id) }.count
-            Text("\(beats.count) cảnh · ⭐ \(starred) · 🚫 \(skipped)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder private var detail: some View {
         if let beat = selectedBeat {
-            VStack(alignment: .leading, spacing: 12) {
-                VideoPlayer(player: controller.player).frame(minHeight: 220).aspectRatio(16 / 9, contentMode: .fit)
-                HStack {
-                    Text(beat.id).font(.headline)
-                    Text("\(Durations.clock(beat.start)) – \(Durations.clock(beat.end))").monospacedDigit().foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Phát lại", systemImage: "play.fill") { playSelected() }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Rectangle().fill(.black).aspectRatio(16 / 9, contentMode: .fit)
+                        .overlay { NativeVideoPlayer(player: controller.player) }
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(beat.id).font(.headline)
+                            Text("\(Durations.clock(beat.start)) – \(Durations.clock(beat.end))")
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Phát lại", systemImage: "play.fill") { playSelected() }
+                    }
+                    markButtons(beat)
+                    if let reason = autoSkips[beat.id] { autoSkipNote(beat, reason: reason) }
+                    Divider()
+                    if let desc = beat.desc, !desc.isEmpty { Text(desc) }
+                    if !beat.dialogue.isEmpty {
+                        Text("Lời thoại").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(beat.dialogue).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
-                if let desc = beat.desc { Text(desc) }
-                if !beat.dialogue.isEmpty {
-                    Text("“\(beat.dialogue)”").italic().foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                if let reason = autoSkips[beat.id] { autoSkipNote(beat, reason: reason) }
-                markButtons(beat)
-                if let message { Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
             }
-            .padding(16)
         } else {
             ContentUnavailableView("Chọn một cảnh", systemImage: "hand.tap", description: Text("Bấm vào một cảnh để xem đoạn phim đó."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -175,7 +199,7 @@ struct SceneBrowserView: View {
 
 /// Keyframe cards of beats; also used to pick a new clip for a script line.
 struct BeatGrid: View {
-    static let cardWidth: CGFloat = 200
+    static let cardWidth: CGFloat = 168
 
     let beats: [SceneBeat]
     let marks: [String: BeatMark]
@@ -188,10 +212,12 @@ struct BeatGrid: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.cardWidth), spacing: 12)], spacing: 12) {
                     ForEach(beats) { beat in
-                        BeatCard(beat: beat, mark: marks[beat.id], isAutoSkipped: autoSkips[beat.id] != nil, projectDir: projectDir,
-                                 isSelected: beat.id == selected)
-                            .onTapGesture { selected = beat.id }
-                            .id(beat.id)
+                        Button { selected = beat.id } label: {
+                            BeatCard(beat: beat, mark: marks[beat.id], isAutoSkipped: autoSkips[beat.id] != nil,
+                                     projectDir: projectDir, isSelected: beat.id == selected)
+                        }
+                        .buttonStyle(.plain)
+                        .id(beat.id)
                     }
                 }
                 .padding(12)
@@ -220,28 +246,28 @@ private struct BeatCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            AsyncImage(url: beat.keyframeURL(in: projectDir)) { image in
-                image.resizable().aspectRatio(16 / 9, contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(.quaternary)
-            }
-            .frame(height: BeatGrid.cardWidth * 9 / 16)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(alignment: .topTrailing) {
-                if let badge { Text(badge).padding(4) }
-            }
-            .opacity(isSkipped ? 0.45 : 1)
-            HStack {
-                Text(beat.id).font(.caption.weight(.semibold))
-                Spacer()
-                Text(Durations.clock(beat.start)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Text(beat.desc ?? beat.dialogue).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        VStack(alignment: .leading, spacing: 6) {
+            Rectangle().fill(.quaternary).aspectRatio(16 / 9, contentMode: .fit)
+                .overlay { Thumbnail(url: beat.keyframeURL(in: projectDir)).opacity(isSkipped ? 0.45 : 1) }
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(alignment: .topTrailing) {
+                    if let badge { Text(badge).padding(4) }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    Text(Durations.clock(beat.start))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(.black.opacity(0.7), in: Capsule())
+                        .padding(6)
+                }
+            Text(beat.id).font(.caption.weight(.semibold))
+            Text(beat.desc ?? beat.dialogue).font(.caption).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
         }
-        .padding(6)
-        .background(isSelected ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isSelected ? Color.accentColor : .secondary.opacity(0.18)))
         .contentShape(Rectangle())
     }
 }

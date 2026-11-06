@@ -78,6 +78,7 @@ class Settings(Frozen):
     scene_threshold: float | None = None  # None = PySceneDetect default for the detector
     llm_provider: str = "claude_cli"
     claude_model: str = "sonnet"
+    codex_model: str = "gpt-6.1-sol"
     # Film sound under narration (0 = muted; it fades back in for `original` lines).
     duck_volume: float = 0.0
     # Background music (absolute path to an audio file, None = no music) and its levels:

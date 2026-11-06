@@ -22,7 +22,7 @@ CHOICES_FILE = "work/character_choices.json"
 CLUSTER_DISTANCE = 0.65  # average cosine distance under which faces are the same person (SFace)
 GENDERS = ("nam", "nữ")
 MIN_FACES = 3  # people seen in fewer sampled frames are extras, not offered for naming
-SAMPLES = 6  # face pictures kept per character
+CANDIDATES = 20  # face pictures to consider per character
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class Character:
     faces: tuple[int, ...]  # indices into the face list
     screen_sec: float
     beats: tuple[str, ...]  # beats the person is seen in, in film order
-    samples: tuple[int, ...]  # best faces for the pictures (big and sure first)
+    samples: tuple[int, ...]  # candidates for the pictures (big and sure first)
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ def build_characters(
             faces=tuple(g),
             screen_sec=len(g) * interval,
             beats=_beats_of([faces[i].time for i in g], beats),
-            samples=tuple(sorted(g, key=lambda i: -(faces[i].box[2] * faces[i].box[3] * faces[i].score))[:SAMPLES]),
+            samples=tuple(sorted(g, key=lambda i: -(faces[i].box[2] * faces[i].box[3] * faces[i].score))[:CANDIDATES]),
         )
         for n, g in enumerate(kept, start=1)
     ]  # fmt: skip

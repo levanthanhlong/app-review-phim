@@ -1,6 +1,7 @@
 # PLAN: Make the "Nhân vật" tab easier to name people in
 
-Status: **approved by the user, not started.** Written 2026-11-05 for another Claude Code session to carry out.
+Status: **implemented.** For an existing project, use **Cập nhật ảnh** in the Nhân vật tab, or run
+`recap characters --project P` to generate the new portraits using the face cache.
 Talk to the user in Vietnamese. Read `docs/CLAUDE.md` and `docs/SPEC_RecapStudio.md` §4.3c and §7.2 (3b) first.
 
 ## Why
@@ -75,8 +76,8 @@ else uses them). The user says many pictures are too unclear to tell who is who:
   must survive a re-run (there is a test: `test_the_users_naming_survives_a_rerun_with_the_same_faces`).
 - The `characters` stage fingerprint must not change in a way that marks `describe`/`script` stale:
   `describe` and `script` fingerprints depend only on the cast signature (names per beat), so new
-  pictures do not stale them. Re-running `characters` (with `--force` if its fingerprint did not
-  change) is how a project gets the new pictures.
+  pictures do not stale them. The new portraits directory is a required stage output. Running
+  `characters` normally on a project with legacy pictures generates the portraits from its face cache.
 - `cast_by_beat`, the `describe` names line, the script cast rule: untouched.
 
 ## Tests (TDD: write them first, see them fail)
@@ -97,7 +98,7 @@ else uses them). The user says many pictures are too unclear to tell who is who:
 On `output/Thất Tình (Thái Lan).recap` (already named: C01 Cha (nữ), C05 Hiro (nam), …):
 
 ```
-cd worker && .venv/bin/python -m recap characters --project "../output/Thất Tình (Thái Lan).recap" --force
+cd worker && .venv/bin/python -m recap characters --project "../output/Thất Tình (Thái Lan).recap"
 ```
 
 Check: `work/character_choices.json` unchanged; describe/script still `done` in `project.json`;

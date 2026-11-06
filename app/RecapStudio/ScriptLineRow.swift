@@ -91,7 +91,7 @@ struct ScriptLineRow: View {
                     .disabled(!isEdited || !actions.canSave)
                     .help("Lưu và tạo lại giọng đọc (chỉ các câu đã sửa)")
                 Button { showRewrite = true } label: { Image(systemName: "sparkles") }
-                    .help("Nhờ Claude viết lại câu này")
+                    .help("Nhờ AI viết lại câu này")
                     .popover(isPresented: $showRewrite, arrowEdge: .leading) {
                         RewritePopover(original: line.text ?? "", rewrite: actions.rewrite) { text in
                             actions.setText(text)
@@ -104,7 +104,7 @@ struct ScriptLineRow: View {
     }
 }
 
-/// "✨ Nhờ Claude viết lại câu này": optional hint, then the suggestion to accept or not.
+/// "✨ Nhờ AI viết lại câu này": optional hint, then the suggestion to accept or not.
 private struct RewritePopover: View {
     let original: String
     let rewrite: (String) async throws -> String
@@ -119,9 +119,9 @@ private struct RewritePopover: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Câu hiện tại").font(.caption).foregroundStyle(.secondary)
             Text(original).fixedSize(horizontal: false, vertical: true)
-            TextField("Gợi ý cho Claude (tùy chọn), ví dụ: kịch tính hơn", text: $hint)
+            TextField("Gợi ý cho AI (tùy chọn), ví dụ: kịch tính hơn", text: $hint)
             if let suggestion {
-                Text("Claude đề xuất").font(.caption).foregroundStyle(.secondary)
+                Text("AI đề xuất").font(.caption).foregroundStyle(.secondary)
                 Text(suggestion).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .padding(8).background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
             }
@@ -147,7 +147,7 @@ private struct RewritePopover: View {
             do {
                 suggestion = try await rewrite(hint)
             } catch {
-                self.error = "Claude chưa viết được: \(error.localizedDescription)"
+                self.error = "AI chưa viết được: \(error.localizedDescription)"
             }
         }
     }

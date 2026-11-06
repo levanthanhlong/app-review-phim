@@ -22,7 +22,7 @@ from typing import Any
 
 from recap import config
 from recap.fit import TimelineEntry
-from recap.llm import LLMError, LLMProvider, get_provider
+from recap.llm import LLMError, LLMProvider, get_provider, model_key, model_label
 from recap.models import SCENES_ADAPTER, Project, Settings
 from recap.music_gen import Generator, default_generators
 from recap.music_options import OptionsFailed, all_options, provenance, remove_unused
@@ -50,7 +50,7 @@ def plan_key(project_dir: Path, settings: Settings) -> str:
     """Identity of everything the cue plan (not the audio) is built from."""
     sigs = [config.file_signature(project_dir / f) for f in (SCRIPT, MANIFEST, SCENES)]
     prompt_hash = hashlib.sha256(_template().encode()).hexdigest()[:12]
-    payload = "|".join([*sigs, prompt_hash, settings.llm_provider, settings.claude_model])
+    payload = "|".join([*sigs, prompt_hash, settings.llm_provider, model_key(settings)])
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -137,7 +137,7 @@ class MusicStage:
         base = _template().replace("{total_sec}", f"{total:.0f}").replace("{min_cue_sec}", str(MIN_CUE_SEC))
         prompt, answer, errors = base, "", []
         for attempt in range(MAX_RETRIES + 1):
-            ctx.emitter.log("info", f"Chia phần nhạc: gọi Claude (lần {attempt + 1})")
+            ctx.emitter.log("info", f"Chia phần nhạc: gọi {model_label(ctx.project.settings)} (lần {attempt + 1})")
             try:
                 answer = provider.generate(prompt, digest)
             except LLMError as exc:
@@ -152,7 +152,7 @@ class MusicStage:
         config.write_text_atomic(ctx.path(RAW_ANSWER), answer)
         raise StageFailure(
             "music_plan_invalid",
-            f"Claude chia phần nhạc sai sau {MAX_RETRIES + 1} lần ({errors[0]}). Bản thô lưu ở {RAW_ANSWER}",
+            f"Model chia phần nhạc sai sau {MAX_RETRIES + 1} lần ({errors[0]}). Bản thô lưu ở {RAW_ANSWER}",
             retryable=True,
         )
 

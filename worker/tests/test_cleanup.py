@@ -30,6 +30,23 @@ def test_reads_watermarks_and_letterbox_from_the_inspect_report(tmp_path: Path) 
     assert cleanup == SourceCleanup(blurs=(Region(0.05, 0.8, 0.3, 0.2),), crop=Region(0.0, 0.125, 1.0, 0.75))
 
 
+@pytest.mark.parametrize(("subtitles", "keep_bottom"), [
+    ([{"x": 0.0, "y": 0.85, "w": 1.0, "h": 0.12}], True),
+    ([{"x": 0.0, "y": 0.78, "w": 1.0, "h": 0.08}], False),
+    (None, False),
+])
+def test_subtitles_in_the_lower_bar_keep_it_in_the_render(
+    tmp_path: Path, subtitles: list[dict[str, float]] | None, keep_bottom: bool
+) -> None:
+    write_report(tmp_path, {"subtitles": subtitles,
+                            "letterbox": {"x": 0.0, "y": 0.125, "w": 1.0, "h": 0.75}})
+
+    cleanup = load_cleanup(tmp_path)
+
+    assert cleanup.keep_subtitle_bar == keep_bottom
+    assert cleanup.crop == Region(0.0, 0.125, 1.0, 0.875 if keep_bottom else 0.75)
+
+
 @pytest.mark.parametrize("content", [None, "{broken", json.dumps({"watermarks": "nope"})])
 def test_no_or_damaged_report_means_no_cleanup(tmp_path: Path, content: str | None) -> None:
     if content is not None:

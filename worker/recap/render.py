@@ -58,10 +58,16 @@ def duck_expression(duration: float, duck: float, fade_in: bool, fade_out: bool)
     return expr
 
 
-def _fit_filter(profile: RenderProfile, layout: BrandLayout | None) -> str:
+def _fit_filter(profile: RenderProfile, layout: BrandLayout | None, keep_subtitle_bar: bool = False) -> str:
     """Scale the film (lanczos) into the frame: whole frame, or the branding layout's box, which it
     either fills (cropping the overflow: no black bars) or fits inside."""
     w, h = profile.width, profile.height
+    if keep_subtitle_bar:
+        # Place any padding below the film and reserve space for the branding bands.
+        bw, x, y, bottom = (layout.video_w, layout.video_x, layout.top, layout.bottom) if layout else (w, 0, 0, 0)
+        color = "0x" + "".join(f"{c:02X}" for c in BG_COLOR) if layout else "black"
+        return (f"scale={bw}:{h - y - bottom}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,"
+                f"pad={w}:{h}:{x}+({bw}-iw)/2:{y}:color={color}")
     if layout is None:
         return f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
     bw, bh, x, y = layout.video_w, layout.video_h, layout.video_x, layout.video_y
@@ -80,7 +86,8 @@ def _segment_filters(
     clean = cleanup_filter(cleanup, f"s{index}", start, end)  # input seeked to `start`: t is 0 there
     video = (
         f"[{index}:v]{clean + ',' if clean else ''}trim=duration={length},setpts=(PTS-STARTPTS)/{_num(speed)},fps={_num(fps)},"
-        f"{_fit_filter(profile, layout)}{',' + SHARPEN if profile.sharpen else ''},setsar=1,format=yuv420p[v{index}]"
+        f"{_fit_filter(profile, layout, cleanup.keep_subtitle_bar)}{',' + SHARPEN if profile.sharpen else ''},"
+        f"setsar=1,format=yuv420p[v{index}]"
     )
     tempo = f",atempo={_num(speed)}" if speed != 1.0 else ""
     audio = (

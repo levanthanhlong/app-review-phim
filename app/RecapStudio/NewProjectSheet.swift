@@ -31,6 +31,15 @@ enum NarrationStyle: String, CaseIterable, Identifiable {
     }
 }
 
+enum TextAIProvider: String, CaseIterable, Identifiable {
+    case claude = "claude_cli"
+    case codex = "codex_cli"
+
+    var id: String { rawValue }
+    var label: String { self == .claude ? "Claude Code" : "Codex" }
+    var models: [String] { self == .claude ? ["sonnet", "opus", "haiku"] : ["gpt-6.1-sol", "gpt-6.1-terra"] }
+}
+
 /// The settings both sheets edit; sent to the worker as `recap set` assignments.
 struct EditableSettings: Equatable {
     static let ratioRange = 0.1...0.4
@@ -38,6 +47,9 @@ struct EditableSettings: Equatable {
 
     var targetRatio = 0.2
     var style = NarrationStyle.kichTinh
+    var llmProvider = TextAIProvider.claude
+    var claudeModel = "sonnet"
+    var codexModel = "gpt-6.1-sol"
     var channelName = "Mắm Review Phim"
     var narrator = "Mắm"
     var voice = "Hải Đăng"
@@ -56,6 +68,9 @@ struct EditableSettings: Equatable {
     init(_ settings: ProjectSettings) {
         targetRatio = settings.targetRatio ?? targetRatio
         style = settings.narrationStyle.flatMap(NarrationStyle.init(rawValue:)) ?? style
+        llmProvider = settings.llmProvider.flatMap(TextAIProvider.init(rawValue:)) ?? llmProvider
+        claudeModel = settings.claudeModel ?? claudeModel
+        codexModel = settings.codexModel ?? codexModel
         channelName = settings.channelName ?? channelName
         narrator = settings.narrator ?? narrator
         voice = settings.voice ?? voice
@@ -74,6 +89,9 @@ struct EditableSettings: Equatable {
         [
             "target_ratio": String(format: "%.2f", targetRatio),
             "narration_style": style.rawValue,
+            "llm_provider": llmProvider.rawValue,
+            "claude_model": claudeModel.trimmingCharacters(in: .whitespacesAndNewlines),
+            "codex_model": codexModel.trimmingCharacters(in: .whitespacesAndNewlines),
             "channel_name": channelName.trimmingCharacters(in: .whitespaces),
             "narrator": narrator.trimmingCharacters(in: .whitespaces),
             "tts_engine": "vieneu",
@@ -184,6 +202,10 @@ struct NewProjectSheet: View {
 struct SettingsFields: View {
     @Binding var settings: EditableSettings
 
+    private var selectedModel: Binding<String> {
+        settings.llmProvider == .claude ? $settings.claudeModel : $settings.codexModel
+    }
+
     var body: some View {
         LabeledContent("Độ dài tóm tắt") {
             HStack {
@@ -199,6 +221,26 @@ struct SettingsFields: View {
                 Slider(value: $settings.duckVolume, in: 0...0.6, step: 0.05)
                 Text("\(Int((settings.duckVolume * 100).rounded()))%").monospacedDigit().frame(width: 44, alignment: .trailing)
             }
+        }
+        Section("AI văn bản") {
+            Picker("Nhà cung cấp", selection: $settings.llmProvider) {
+                ForEach(TextAIProvider.allCases) { Text($0.label).tag($0) }
+            }
+            LabeledContent("Model") {
+                HStack {
+                    TextField("Mã model", text: selectedModel)
+                    Menu("Chọn model") {
+                        ForEach(settings.llmProvider.models, id: \.self) { model in
+                            Button(model) { selectedModel.wrappedValue = model }
+                        }
+                    }
+                }
+            }
+            if settings.llmProvider == .codex {
+                LabeledContent("Mức suy luận", value: "Medium")
+            }
+            Text("Dùng cho kịch bản, gợi ý tên nhân vật và kế hoạch nhạc AI.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         Section("Giọng đọc") {
             VoicePickerView(voice: $settings.voice, ratePercent: $settings.ratePercent)

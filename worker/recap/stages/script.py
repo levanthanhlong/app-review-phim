@@ -21,7 +21,7 @@ from recap import config
 from recap.beat_marks import apply_marks, auto_skips, effective_marks, marks_signature
 from recap.characters import UNNAMED, Cast, cast_signature, project_cast
 from recap.digest import CAST_LABEL, IMPORTANT_FLAG, digest_text, split_parts
-from recap.llm import LLMError, LLMProvider, get_provider
+from recap.llm import LLMError, LLMProvider, get_provider, model_key, model_label
 from recap.models import DESCRIBED_ADAPTER, DescribedBeat, Project, Settings
 from recap.runner import StageContext, StageFailure
 from recap.script_model import Item, parse_response, validate_items
@@ -200,7 +200,7 @@ class ScriptStage:
         duration = project.media.duration if project.media else 0.0
         prompt_hash = hashlib.sha256((_template() + _guide()).encode()).hexdigest()[:12]
         speed = f"{self._fingerprint_speed(project_dir, s):.2f}"  # a much faster/slower voice needs other text
-        fields = [s.target_ratio, s.narration_style, s.llm_provider, s.claude_model, s.part_size_min, duration, speed,
+        fields = [s.target_ratio, s.narration_style, s.llm_provider, model_key(s), s.part_size_min, duration, speed,
                   s.channel_name, s.narrator]  # fmt: skip
         marks = marks_signature(project_dir)  # only when the user marked beats
         cast = cast_signature(project_cast(project_dir).by_beat)  # only when the user named people
@@ -292,7 +292,7 @@ class ScriptStage:
         settings = ctx.project.settings
         prompt = part_prompt(settings, ctx.project.title, index, total, previous_summary, target, speed,
                              has_starred=any(b.id in starred for b in beats), cast=cast.names)  # fmt: skip
-        key = hashlib.sha256(f"{settings.claude_model}\n{prompt}\n{digest}".encode()).hexdigest()[:16]
+        key = hashlib.sha256(f"{model_key(settings)}\n{prompt}\n{digest}".encode()).hexdigest()[:16]
         part_file = ctx.path(f"{PARTS_DIR}/part_{index:02d}.yaml")
         cached = self._load_part(part_file, key)
         if cached is not None:
@@ -326,7 +326,7 @@ class ScriptStage:
         """Call the LLM; on invalid output retry up to MAX_RETRIES times with the errors attached."""
         current_prompt, answer, errors = prompt, "", []
         for attempt in range(MAX_RETRIES + 1):
-            ctx.emitter.log("info", f"Phần {index}: gọi Claude (lần {attempt + 1})")
+            ctx.emitter.log("info", f"Phần {index}: gọi {model_label(ctx.project.settings)} (lần {attempt + 1})")
             try:
                 answer = provider.generate(current_prompt, digest)
             except LLMError as exc:
@@ -349,7 +349,7 @@ class ScriptStage:
         config.write_text_atomic(ctx.path(f"{PARTS_DIR}/part_{index:02d}.raw.txt"), answer)
         raise StageFailure(
             "script_invalid",
-            f"Phần {index}: Claude trả kết quả sai sau {MAX_RETRIES + 1} lần ({errors[0]}). "
+            f"Phần {index}: Model trả kết quả sai sau {MAX_RETRIES + 1} lần ({errors[0]}). "
             f"Bản thô lưu ở {PARTS_DIR}/part_{index:02d}.raw.txt",
             retryable=True,
         )

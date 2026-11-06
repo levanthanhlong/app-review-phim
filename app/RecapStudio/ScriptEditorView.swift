@@ -90,8 +90,8 @@ struct ScriptEditorView: View {
             if editor.isSaving { ProgressView().controlSize(.small) }
             Button("Nhận xét & viết lại", systemImage: "text.bubble") { isRevising = true }
                 .disabled(editor.isDirty || editor.isSaving || isBusy)
-                .help(editor.isDirty ? "Lưu các chỗ đang sửa trước, Claude sẽ viết lại từ bản đã lưu"
-                      : isBusy ? "Đợi tác vụ của dự án này xong" : "Viết nhận xét, Claude viết lại cả kịch bản theo đó")
+                .help(editor.isDirty ? "Lưu các chỗ đang sửa trước, Model AI sẽ viết lại từ bản đã lưu"
+                      : isBusy ? "Đợi tác vụ của dự án này xong" : "Viết nhận xét, AI viết lại cả kịch bản theo đó")
             Button("Hoàn tác", systemImage: "arrow.uturn.backward") { editor.revert() }
                 .disabled(!editor.isDirty || editor.isSaving)
             Button("Lưu", systemImage: "square.and.arrow.down") { save(then: nil) }

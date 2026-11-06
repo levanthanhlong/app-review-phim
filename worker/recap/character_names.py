@@ -84,4 +84,4 @@ def find_names(dialogue: Sequence[TranscriptSegment], provider: LLMProvider) -> 
                 return _candidates(pairs, dialogue), None
     except LLMError as exc:
         return [], f"Không lấy được tên từ lời thoại ({exc.message}); vẫn có thể tự gõ tên"
-    return [], "Claude không trả về danh sách tên hợp lệ; vẫn có thể tự gõ tên"
+    return [], "Model AI không trả về danh sách tên hợp lệ; vẫn có thể tự gõ tên"

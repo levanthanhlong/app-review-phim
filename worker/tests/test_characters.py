@@ -56,6 +56,7 @@ def test_people_seen_too_rarely_are_not_offered_and_ids_follow_screen_time() -> 
     assert [c.id for c in characters] == ["C01", "C02", "C03"]  # the extra (2 faces) is left out
     pan, hiro, mother = characters
     assert pan.screen_sec == 25 and pan.beats == ("B0001", "B0002", "B0003")
+    assert len(pan.samples) == 20
     assert hiro.beats == ("B0002",) and mother.beats == ("B0003",)
 
 
